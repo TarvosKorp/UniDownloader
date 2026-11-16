@@ -9,14 +9,11 @@ name = "UniDownloader"
 path = "src/main.rs"
 
 [dependencies]
-module-api = { path = "../module-api" }
-module-udio = { path = "../module-udio" }
-module-youtube = { path = "../module-youtube" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-lnks = "0.2"
 libloading = "0.8"
+lnks = "0.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

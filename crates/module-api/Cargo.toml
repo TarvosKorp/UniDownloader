@@ -3,5 +3,6 @@ name = "module-api"
 version.workspace = true
 edition.workspace = true
 
+# Намеренно без зависимостей: этот крейт линкуется в каждую DLL-модуль,
+# поэтому он должен оставаться маленьким.
 [dependencies]
-serde = { version = "1", features = ["derive"] }

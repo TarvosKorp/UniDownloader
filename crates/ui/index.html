@@ -17,7 +17,26 @@
             </select>
         </div>
 
-        <button id="create-shortcuts-btn" class="secondary-btn">Create Shortcuts</button>
+        <div class="control-group">
+            <label for="url-input">Video URL:</label>
+            <input type="text" id="url-input" placeholder="https://...">
+        </div>
+
+        <div class="control-group">
+            <label for="quality-select">Quality:</label>
+            <select id="quality-select">
+                <option value="360p">360p</option>
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+                <option value="MP3">MP3</option>
+            </select>
+        </div>
+
+        <div class="button-row">
+            <button id="download-btn" class="primary-btn">Download</button>
+            <button id="create-shortcuts-btn" class="secondary-btn">Create Shortcuts</button>
+        </div>
+        
         <div id="status" class="status"></div>
     </div>
     <script src="main.js"></script>

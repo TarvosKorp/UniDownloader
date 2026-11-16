@@ -21,7 +21,7 @@ jobs:
       - name: Cache Cargo
         uses: swatinem/rust-cache@v2
 
-      - name: Build Core and Module
+      - name: Build
         run: cargo build --release -p core -p module-youtube
 
       - name: Upload Artifact

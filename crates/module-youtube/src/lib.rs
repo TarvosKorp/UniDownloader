@@ -1,61 +1,84 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use module_api::{guard, hide_console, Request};
+use std::ffi::c_char;
+use std::path::Path;
 use std::process::Command;
-use std::path::PathBuf;
 
-// Экспортируемая функция. Ядро будет её вызывать.
-// Принимает C-строки (указатели на char), возвращает 0 (успех) или 1 (ошибка).
 #[no_mangle]
-pub extern "C" fn run_download(
+pub extern "C" fn module_abi_version() -> u32 {
+    module_api::ABI_VERSION
+}
+
+/// # Safety
+/// Вызывается ядром с валидными C-строками и буфером ошибки.
+#[no_mangle]
+pub unsafe extern "C" fn run_download(
     url: *const c_char,
     quality: *const c_char,
     output_dir: *const c_char,
     ytdlp_path: *const c_char,
     ffmpeg_path: *const c_char,
+    err_buf: *mut c_char,
+    err_buf_len: usize,
 ) -> i32 {
-    // Конвертируем C-строки в Rust String (unsafe, так как это FFI)
-    let url = unsafe { CStr::from_ptr(url).to_string_lossy().to_string() };
-    let quality = unsafe { CStr::from_ptr(quality).to_string_lossy().to_string() };
-    let output_dir = unsafe { CStr::from_ptr(output_dir).to_string_lossy().to_string() };
-    let ytdlp = unsafe { CStr::from_ptr(ytdlp_path).to_string_lossy().to_string() };
-    let ffmpeg = unsafe { CStr::from_ptr(ffmpeg_path).to_string_lossy().to_string() };
+    guard(err_buf, err_buf_len, || {
+        let req = Request::from_raw(url, quality, output_dir, ytdlp_path, ffmpeg_path)?;
+        download(&req)
+    })
+}
 
-    // Формируем команду для yt-dlp (как мы делали в Python)
-    let mut cmd = Command::new(&ytdlp);
+fn download(req: &Request) -> Result<(), String> {
+    if !(req.url.starts_with("http://") || req.url.starts_with("https://")) {
+        return Err(format!("Invalid URL: {}", req.url));
+    }
+
+    let mut cmd = Command::new(&req.ytdlp_path);
+    hide_console(&mut cmd);
     cmd.arg("--no-playlist");
-    cmd.arg("--ffmpeg-location").arg(&ffmpeg);
+    cmd.arg("--ffmpeg-location").arg(&req.ffmpeg_path);
 
-    if quality == "MP3" {
+    if req.quality.eq_ignore_ascii_case("mp3") {
         cmd.arg("-x").arg("--audio-format").arg("mp3");
         cmd.arg("--audio-quality").arg("160K");
         cmd.arg("--embed-thumbnail").arg("--embed-metadata");
         cmd.arg("--convert-thumbnails").arg("jpg");
-        // Обрезка обложки (как в Python-версии)
         let crop_filter = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'";
-        cmd.arg("--ppa").arg(format!("ThumbnailsConvertor+ffmpeg_o:-vf \"{}\"", crop_filter));
+        cmd.arg("--ppa")
+            .arg(format!("ThumbnailsConvertor+ffmpeg_o:-vf \"{}\"", crop_filter));
     } else {
-        let height = quality.replace("p", "");
-        let format_str = format!("bestvideo[height<={}]+bestaudio/best[height<={}]", height, height);
-        cmd.arg("-f").arg(format_str);
+        let height: u32 = req
+            .quality
+            .trim_end_matches(['p', 'P'])
+            .parse()
+            .map_err(|_| format!("Unsupported quality: {}", req.quality))?;
+        cmd.arg("-f").arg(format!(
+            "bestvideo[height<={h}]+bestaudio/best[height<={h}]",
+            h = height
+        ));
         cmd.arg("--merge-output-format").arg("mp4");
     }
 
-    cmd.arg("-o").arg(format!("{}/%(title)s.%(ext)s", output_dir));
-    cmd.arg(&url);
+    let template = Path::new(&req.output_dir).join("%(title)s.%(ext)s");
+    cmd.arg("-o").arg(template);
+    cmd.arg("--").arg(&req.url);
 
-    // Запускаем процесс
-    match cmd.output() {
-        Ok(output) => {
-            if output.status.success() {
-                0 // Успех
-            } else {
-                eprintln!("yt-dlp error: {}", String::from_utf8_lossy(&output.stderr));
-                1 // Ошибка
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to run yt-dlp: {}", e);
-            1
-        }
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run yt-dlp ({}): {e}", req.ytdlp_path))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let line = stderr
+            .lines()
+            .rev()
+            .find(|l| l.starts_with("ERROR"))
+            .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
+            .unwrap_or("no error output");
+        let code = output
+            .status
+            .code()
+            .map_or_else(|| "?".to_string(), |c| c.to_string());
+        Err(format!("yt-dlp exited with code {code}: {line}"))
     }
 }
