@@ -24,9 +24,10 @@ struct UniApp {
     bitrate: String,
     status: String,
     is_downloading: bool,
-    // Канал для получения результатов из потоков
     tx: Sender<String>,
     rx: Receiver<String>,
+    // Контекстное меню для поля URL
+    context_menu_pos: Option<egui::Pos2>,
 }
 
 impl Default for UniApp {
@@ -42,6 +43,7 @@ impl Default for UniApp {
             is_downloading: false,
             tx,
             rx,
+            context_menu_pos: None,
         };
         app.modules = get_modules();
         app
@@ -50,6 +52,26 @@ impl Default for UniApp {
 
 fn get_exe_dir_path() -> PathBuf {
     std::env::current_exe().unwrap().parent().unwrap().to_path_buf()
+}
+
+// Чтение пути к ffmpeg из config.ini
+fn get_ffmpeg_path() -> PathBuf {
+    let exe_dir = get_exe_dir_path();
+    let config_path = exe_dir.join("config.ini");
+    
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with("FFMPEG_PATH") && line.contains('=') {
+                let path = line.split('=').nth(1).unwrap_or("").trim();
+                if !path.is_empty() {
+                    return PathBuf::from(path);
+                }
+            }
+        }
+    }
+    // По умолчанию — папка Windows
+    PathBuf::from("C:\\Windows\\ffmpeg.exe")
 }
 
 fn get_modules() -> Vec<ModuleInfo> {
@@ -79,12 +101,12 @@ fn call_module_download(
     url: &str,
     quality: &str,
     bitrate: Option<&str>,
+    ffmpeg_path: &PathBuf,
 ) -> Result<String, String> {
     let exe_dir = get_exe_dir_path();
     let module_dir = exe_dir.join("Modules").join(module_id);
     let dll_path = module_dir.join(format!("module_{}.dll", module_id));
     let ytdlp_path = exe_dir.join("Components").join("yt-dlp.exe");
-    let ffmpeg_path = exe_dir.join("Components").join("ffmpeg.exe");
     let output_dir = exe_dir.join("Downloads").join(module_id);
     
     std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
@@ -121,7 +143,12 @@ fn call_module_download(
     }
 }
 
-fn batch_download(module_id: &str, quality: &str, bitrate: Option<&str>) -> Result<String, String> {
+fn batch_download(
+    module_id: &str, 
+    quality: &str, 
+    bitrate: Option<&str>,
+    ffmpeg_path: &PathBuf,
+) -> Result<String, String> {
     let exe_dir = get_exe_dir_path();
     let list_file = exe_dir.join(format!("Download{}List.txt", module_id));
     if !list_file.exists() { return Err("List file not found".to_string()); }
@@ -135,7 +162,7 @@ fn batch_download(module_id: &str, quality: &str, bitrate: Option<&str>) -> Resu
         let raw_url = lines[i].trim().to_string();
         if raw_url.is_empty() || raw_url.starts_with("BadLink ") { continue; }
 
-        match call_module_download(module_id, &raw_url, quality, bitrate) {
+        match call_module_download(module_id, &raw_url, quality, bitrate, ffmpeg_path) {
             Ok(_) => { success += 1; lines[i] = String::new(); }
             Err(_) => { fail += 1; lines[i] = format!("BadLink {}", raw_url); }
         }
@@ -183,14 +210,15 @@ fn create_shortcuts() -> Result<String, String> {
 
 impl eframe::App for UniApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Проверяем, не пришёл ли результат из фонового потока
         if let Ok(msg) = self.rx.try_recv() {
             self.status = msg;
             self.is_downloading = false;
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("UniDownloader");
+            // Цвет заголовка
+            let header_color = egui::Color32::from_rgb(0, 168, 255);
+            ui.label(egui::RichText::new("UniDownloader").size(22.0).color(header_color).strong());
             ui.separator();
 
             // Выбор модуля
@@ -208,21 +236,35 @@ impl eframe::App for UniApp {
 
             ui.add_space(5.0);
 
-            // URL
+            // URL с контекстным меню
             ui.horizontal(|ui| {
                 ui.label("URL:");
-                ui.add(egui::TextEdit::singleline(&mut self.url).desired_width(400.0));
+                let response = ui.add(egui::TextEdit::singleline(&mut self.url).desired_width(400.0));
+                
+                // Контекстное меню по правой кнопке
+                response.context_menu(|ui| {
+                    if ui.button("Paste").clicked() {
+                        if let Ok(text) = arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+                            self.url = text;
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Clear").clicked() {
+                        self.url.clear();
+                        ui.close_menu();
+                    }
+                });
             });
 
             ui.add_space(5.0);
 
-            // Качество
+            // Качество и битрейт
             ui.horizontal(|ui| {
                 ui.label("Quality:");
                 egui::ComboBox::from_id_salt("quality_combo")
                     .selected_text(&self.quality)
                     .show_ui(ui, |ui| {
-                        for q in &["360p", "480p", "720p", "1080p", "MP3"] {
+                        for q in &["144p", "240p", "360p", "480p", "720p", "1080p", "MP3"] {
                             ui.selectable_value(&mut self.quality, q.to_string(), *q);
                         }
                     });
@@ -249,15 +291,13 @@ impl eframe::App for UniApp {
                     let url = self.url.clone();
                     let quality = self.quality.clone();
                     let bitrate = if quality == "MP3" { Some(self.bitrate.clone()) } else { None };
+                    let ffmpeg = get_ffmpeg_path();
                     let tx = self.tx.clone();
                     self.status = "Downloading...".to_string();
                     self.is_downloading = true;
                     std::thread::spawn(move || {
-                        let res = call_module_download(&module, &url, &quality, bitrate.as_deref());
-                        let msg = match res {
-                            Ok(s) => s,
-                            Err(e) => format!("Error: {}", e),
-                        };
+                        let res = call_module_download(&module, &url, &quality, bitrate.as_deref(), &ffmpeg);
+                        let msg = match res { Ok(s) => s, Err(e) => format!("Error: {}", e) };
                         let _ = tx.send(msg);
                     });
                 }
@@ -266,15 +306,13 @@ impl eframe::App for UniApp {
                     let module = self.modules[self.selected_module].id.clone();
                     let quality = self.quality.clone();
                     let bitrate = if quality == "MP3" { Some(self.bitrate.clone()) } else { None };
+                    let ffmpeg = get_ffmpeg_path();
                     let tx = self.tx.clone();
                     self.status = "Batch processing...".to_string();
                     self.is_downloading = true;
                     std::thread::spawn(move || {
-                        let res = batch_download(&module, &quality, bitrate.as_deref());
-                        let msg = match res {
-                            Ok(s) => s,
-                            Err(e) => format!("Error: {}", e),
-                        };
+                        let res = batch_download(&module, &quality, bitrate.as_deref(), &ffmpeg);
+                        let msg = match res { Ok(s) => s, Err(e) => format!("Error: {}", e) };
                         let _ = tx.send(msg);
                     });
                 }
@@ -282,7 +320,7 @@ impl eframe::App for UniApp {
 
             ui.add_space(5.0);
 
-            // Кнопки открытия файлов и папок
+            // Кнопки открытия и ярлыков
             ui.horizontal(|ui| {
                 let module_id = self.modules.get(self.selected_module).map(|m| m.id.clone()).unwrap_or_default();
                 if ui.button("📄 Open List").clicked() {
@@ -304,7 +342,14 @@ impl eframe::App for UniApp {
             });
 
             ui.add_space(10.0);
-            ui.label(&self.status);
+            
+            // Статус с цветом (зелёный для успеха, красный для ошибки)
+            let status_color = if self.status.starts_with("Error") {
+                egui::Color32::from_rgb(255, 77, 77)
+            } else {
+                header_color
+            };
+            ui.label(egui::RichText::new(&self.status).color(status_color));
 
             if self.is_downloading {
                 ui.spinner();
@@ -316,13 +361,18 @@ impl eframe::App for UniApp {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 400.0])
+            .with_inner_size([550.0, 300.0])
             .with_resizable(false),
         ..Default::default()
     };
     eframe::run_native(
         "UniDownloader",
         options,
-        Box::new(|_cc| Ok(Box::new(UniApp::default()))),
+        Box::new(|cc| {
+            let mut visuals = egui::Visuals::dark();
+            visuals.panel_fill = egui::Color32::from_rgb(30, 30, 30);
+            cc.egui_ctx.set_visuals(visuals);
+            Ok(Box::new(UniApp::default()))
+        }),
     )
 }

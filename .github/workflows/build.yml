@@ -19,7 +19,7 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release -p core
+        run: cargo build --release -p core -p module-youtube
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -27,3 +27,4 @@ jobs:
           name: UniDownloader-Windows
           path: |
             target/release/UniDownloader.exe
+            target/release/module_youtube.dll
