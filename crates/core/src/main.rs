@@ -65,13 +65,12 @@ fn create_shortcuts() -> Result<String, String> {
                         let shortcut_name = format!("{}.lnk", name);
                         let shortcut_path = base_dir.join(&shortcut_name);
 
-                        // ИСПРАВЛЕНО: правильный тип для иконки в lnks 0.2
                         let icon_path = path.join("Icon.ico");
                         let shortcut = lnks::ShortcutBuilder::new(exe_path.clone())
                             .arguments(format!("--module {}", id))
                             .working_dir(base_dir.to_string_lossy().to_string())
                             .description(format!("Download from {}", name))
-                            .icon(lnks::Icon::File(icon_path)) // <-- ИСПОЛЬЗУЕМ Icon::File
+                            .icon(lnks::Icon::new(icon_path)) // Исправлено!
                             .build();
 
                         if let Err(e) = shortcut.save(&shortcut_path) {
@@ -88,7 +87,7 @@ fn create_shortcuts() -> Result<String, String> {
 
 #[tauri::command]
 async fn run_download(
-    _state: State<'_, AppState>, // <-- Переименовали, чтобы убрать warning
+    _state: State<'_, AppState>,
     module_id: String, 
     url: String, 
     quality: String
