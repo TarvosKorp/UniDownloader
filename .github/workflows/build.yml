@@ -22,7 +22,7 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --workspace
+        run: cargo build --release -p core
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

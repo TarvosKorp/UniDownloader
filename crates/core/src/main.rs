@@ -1,4 +1,3 @@
-// Скрываем консоль в релизной сборке Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use module_api::DownloaderModule;
@@ -6,20 +5,17 @@ use module_udio::UdioModule;
 use module_youtube::YouTubeModule;
 
 fn main() {
-    // Собираем модули
     let modules: Vec<Box<dyn DownloaderModule>> = vec![
         Box::new(UdioModule),
         Box::new(YouTubeModule),
     ];
 
-    // Парсим аргументы (--module <id>)
     let args: Vec<String> = std::env::args().collect();
     let active_module = args.iter()
         .position(|a| a == "--module")
         .and_then(|i| args.get(i + 1))
         .cloned();
 
-    // Запускаем Tauri
     tauri::Builder::default()
         .setup(move |_app| {
             if let Some(id) = &active_module {
