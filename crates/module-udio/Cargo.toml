@@ -3,5 +3,13 @@ name = "module-udio"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
 module-api = { path = "../module-api" }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+widevine = "0.1.0"
+regex = "1"
+hex = "0.4"

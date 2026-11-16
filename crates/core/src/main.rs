@@ -74,6 +74,32 @@ fn get_ffmpeg_path() -> PathBuf {
     PathBuf::from("C:\\Windows\\ffmpeg.exe")
 }
 
+fn apply_proxy_from_config() {
+    let exe_dir = get_exe_dir_path();
+    let config_path = exe_dir.join("config.ini");
+    
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        for line in content.lines() {
+            let line = line.trim();
+            // Пропускаем пустые строки и комментарии
+            if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+                continue;
+            }
+            
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                
+                if key.eq_ignore_ascii_case("HTTP_PROXY") {
+                    std::env::set_var("HTTP_PROXY", value);
+                } else if key.eq_ignore_ascii_case("HTTPS_PROXY") {
+                    std::env::set_var("HTTPS_PROXY", value);
+                }
+            }
+        }
+    }
+}
+
 fn get_modules() -> Vec<ModuleInfo> {
     let exe_dir = get_exe_dir_path();
     let modules_dir = exe_dir.join("Modules");
@@ -359,6 +385,9 @@ impl eframe::App for UniApp {
 }
 
 fn main() -> eframe::Result {
+    // Применяем прокси из config.ini перед запуском
+    apply_proxy_from_config();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([550.0, 300.0])
