@@ -151,7 +151,6 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     
     let pssh = Pssh::from_b64(&pssh_b64).map_err(|e| format!("Invalid PSSH: {:?}", e))?;
     
-    // KID уникален для каждого трека, берём первый из PSSH
     let kid = pssh.key_ids.first().ok_or("No KID in PSSH")?.clone();
     
     let request = cdm.open().get_license_request(pssh, LicenseType::STREAMING)
@@ -170,11 +169,10 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     
     let keys = request.get_keys(&lic_data).map_err(|e| format!("Failed to get keys: {:?}", e))?;
     
-    // content_key возвращает Result, поэтому используем map_err
     let content_key = keys.content_key(&kid)
         .map_err(|e| format!("Content key not found for KID: {:?}", e))?;
     
-    Ok(hex::encode(content_key.key))
+    Ok(hex::encode(content_key.key.clone()))
 }
 
 fn parse_manifest(manifest_url: &str) -> Result<(String, Vec<String>), String> {
