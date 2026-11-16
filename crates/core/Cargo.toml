@@ -2,6 +2,7 @@
 name = "core"
 version.workspace = true
 edition.workspace = true
+build = "build.rs" # Добавляем строку
 
 [[bin]]
 name = "UniDownloader"
@@ -11,3 +12,6 @@ path = "src/main.rs"
 module-api = { path = "../module-api" }
 module-udio = { path = "../module-udio" }
 module-youtube = { path = "../module-youtube" }
+
+[build-dependencies]
+winres = "0.1" # Добавляем крейт для иконок
