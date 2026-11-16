@@ -8,8 +8,6 @@ pub extern "C" fn module_abi_version() -> u32 {
     module_api::ABI_VERSION
 }
 
-/// # Safety
-/// Вызывается ядром с валидными C-строками и буфером ошибки.
 #[no_mangle]
 pub unsafe extern "C" fn run_download(
     url: *const c_char,
@@ -36,17 +34,24 @@ fn download(req: &Request) -> Result<(), String> {
     cmd.arg("--no-playlist");
     cmd.arg("--ffmpeg-location").arg(&req.ffmpeg_path);
 
-    if req.quality.eq_ignore_ascii_case("mp3") {
+    let quality_upper = req.quality.to_uppercase();
+    if quality_upper.starts_with("MP3") {
+        // Парсим битрейт, если он есть (формат "MP3:192")
+        let bitrate = if let Some(idx) = req.quality.find(':') {
+            req.quality[idx+1..].to_string()
+        } else {
+            "160".to_string() // по умолчанию
+        };
+
         cmd.arg("-x").arg("--audio-format").arg("mp3");
-        cmd.arg("--audio-quality").arg("160K");
+        cmd.arg("--audio-quality").arg(format!("{}K", bitrate));
         cmd.arg("--embed-thumbnail").arg("--embed-metadata");
         cmd.arg("--convert-thumbnails").arg("jpg");
         let crop_filter = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'";
         cmd.arg("--ppa")
             .arg(format!("ThumbnailsConvertor+ffmpeg_o:-vf \"{}\"", crop_filter));
     } else {
-        let height: u32 = req
-            .quality
+        let height: u32 = req.quality
             .trim_end_matches(['p', 'P'])
             .parse()
             .map_err(|_| format!("Unsupported quality: {}", req.quality))?;
@@ -75,10 +80,7 @@ fn download(req: &Request) -> Result<(), String> {
             .find(|l| l.starts_with("ERROR"))
             .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
             .unwrap_or("no error output");
-        let code = output
-            .status
-            .code()
-            .map_or_else(|| "?".to_string(), |c| c.to_string());
+        let code = output.status.code().map_or_else(|| "?".to_string(), |c| c.to_string());
         Err(format!("yt-dlp exited with code {code}: {line}"))
     }
 }

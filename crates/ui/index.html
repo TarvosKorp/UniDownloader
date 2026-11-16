@@ -26,18 +26,35 @@
             <label for="quality-select">Quality:</label>
             <select id="quality-select">
                 <option value="360p">360p</option>
+                <option value="480p">480p</option>
                 <option value="720p">720p</option>
                 <option value="1080p">1080p</option>
                 <option value="MP3">MP3</option>
             </select>
         </div>
 
+        <div class="control-group" id="bitrate-group" style="display: none;">
+            <label for="bitrate-select">MP3 Bitrate (kbps):</label>
+            <select id="bitrate-select">
+                <option value="128">128</option>
+                <option value="160" selected>160</option>
+                <option value="192">192</option>
+                <option value="256">256</option>
+            </select>
+        </div>
+
         <div class="button-row">
             <button id="download-btn" class="primary-btn">Download</button>
-            <button id="create-shortcuts-btn" class="secondary-btn">Create Shortcuts</button>
+            <button id="batch-btn" class="secondary-btn">Batch Download</button>
+            <button id="open-list-btn" class="icon-btn" title="Open List">📄</button>
         </div>
         
-        <div id="status" class="status"></div>
+        <div class="status" id="status"></div>
+
+        <div class="bottom-bar">
+            <button id="create-shortcuts-btn" class="secondary-btn small-btn">Create Shortcuts</button>
+            <button id="open-folder-btn" class="icon-btn" title="Open Downloads Folder">📁</button>
+        </div>
     </div>
     <script src="main.js"></script>
 </body>
