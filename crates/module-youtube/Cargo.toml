@@ -3,5 +3,8 @@ name = "module-youtube"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib"] # Важно! Собираем как DLL
+
 [dependencies]
-module-api = { path = "../module-api" }
+serde_json = "1" # Для парсинга module.json, если нужно

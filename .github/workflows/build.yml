@@ -24,8 +24,13 @@ jobs:
       - name: Build
         run: cargo build --release -p core
 
+      - name: Build
+        run: cargo build --release -p core -p module-youtube
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: UniDownloader-Windows
-          path: target/release/UniDownloader.exe
+          path: |
+            target/release/UniDownloader.exe
+            target/release/youtube_module.dll
