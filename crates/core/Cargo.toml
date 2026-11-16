@@ -1,0 +1,13 @@
+[package]
+name = "core"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "UniDownloader"
+path = "src/main.rs"
+
+[dependencies]
+module-api = { path = "../module-api" }
+module-udio = { path = "../module-udio" }
+module-youtube = { path = "../module-youtube" }

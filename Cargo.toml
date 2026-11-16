@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/module-api",
+    "crates/module-udio",
+    "crates/module-youtube",
+]
+resolver = "2"
+
+# Общие настройки для всех крейтов (опционально, но удобно)
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Haldjarvi"]

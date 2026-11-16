@@ -1,0 +1,7 @@
+[package]
+name = "module-udio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+module-api = { path = "../module-api" }
