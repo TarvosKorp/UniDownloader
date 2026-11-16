@@ -3,11 +3,9 @@
 use libloading::{Library, Symbol};
 use serde::Serialize;
 use std::ffi::CString;
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::State;
 
-// Определяем тип функции из нашего нового ABI
 type RunDownloadFn = unsafe extern "C" fn(
     *const i8, *const i8, *const i8, *const i8, *const i8, *mut i8, usize,
 ) -> i32;
@@ -18,7 +16,6 @@ struct ModuleInfo {
     name: String,
 }
 
-// Держим загруженные библиотеки в памяти, чтобы они не выгружались
 struct AppState {
     loaded_libs: Mutex<Vec<Library>>,
 }
@@ -68,11 +65,13 @@ fn create_shortcuts() -> Result<String, String> {
                         let shortcut_name = format!("{}.lnk", name);
                         let shortcut_path = base_dir.join(&shortcut_name);
 
+                        // ИСПРАВЛЕНО: правильный тип для иконки в lnks 0.2
+                        let icon_path = path.join("Icon.ico");
                         let shortcut = lnks::ShortcutBuilder::new(exe_path.clone())
                             .arguments(format!("--module {}", id))
                             .working_dir(base_dir.to_string_lossy().to_string())
                             .description(format!("Download from {}", name))
-                            .icon(path.join("Icon.ico").to_string_lossy().to_string(), 0)
+                            .icon(lnks::Icon::File(icon_path)) // <-- ИСПОЛЬЗУЕМ Icon::File
                             .build();
 
                         if let Err(e) = shortcut.save(&shortcut_path) {
@@ -89,7 +88,7 @@ fn create_shortcuts() -> Result<String, String> {
 
 #[tauri::command]
 async fn run_download(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>, // <-- Переименовали, чтобы убрать warning
     module_id: String, 
     url: String, 
     quality: String
@@ -97,7 +96,6 @@ async fn run_download(
     let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
     let module_dir = exe_dir.join("Modules").join(&module_id);
     
-    // По контракту Клода, DLL должна называться module_<id>.dll
     let dll_path = module_dir.join(format!("module_{}.dll", module_id));
     
     let ytdlp_path = exe_dir.join("Components").join("yt-dlp.exe");
@@ -106,7 +104,6 @@ async fn run_download(
     
     std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
 
-    // Загружаем DLL и вызываем функцию
     let dll_path_clone = dll_path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         unsafe {
@@ -122,7 +119,6 @@ async fn run_download(
             let c_ytdlp = CString::new(ytdlp_path.to_string_lossy().to_string()).map_err(|e| e.to_string())?;
             let c_ffmpeg = CString::new(ffmpeg_path.to_string_lossy().to_string()).map_err(|e| e.to_string())?;
 
-            // Буфер для ошибки (512 байт)
             let mut err_buf = [0i8; 512];
             
             let result_code = func(
@@ -130,8 +126,6 @@ async fn run_download(
                 err_buf.as_mut_ptr(), err_buf.len()
             );
 
-            // Сохраняем библиотеку в состоянии, чтобы она не выгрузилась
-            // (В реальном коде нужно передать State сюда, но для простоты используем mem::forget)
             std::mem::forget(lib);
 
             if result_code == 0 {
