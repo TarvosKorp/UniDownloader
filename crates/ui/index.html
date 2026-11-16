@@ -9,8 +9,16 @@
 <body>
     <div class="container">
         <h1>UniDownloader</h1>
-        <p>Select a module from the list below:</p>
-        <div id="modules-list"></div>
+        
+        <div class="control-group">
+            <label for="module-select">Select Module:</label>
+            <select id="module-select">
+                <option value="" disabled selected>Loading modules...</option>
+            </select>
+        </div>
+
+        <button id="create-shortcuts-btn" class="secondary-btn">Create Shortcuts</button>
+        <div id="status" class="status"></div>
     </div>
     <script src="main.js"></script>
 </body>
