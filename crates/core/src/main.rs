@@ -5,7 +5,6 @@ use serde::Serialize;
 use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
 
 type RunDownloadFn = unsafe extern "C" fn(
     *const i8, *const i8, *const i8, *const i8, *const i8, *mut i8, usize,
@@ -21,7 +20,6 @@ struct AppState {
     loaded_libs: Mutex<Vec<Library>>,
 }
 
-// Вспомогательная функция для получения путей
 fn get_exe_dir_path() -> PathBuf {
     std::env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
@@ -90,7 +88,6 @@ fn create_shortcuts() -> Result<String, String> {
     Ok(format!("Created {} shortcuts", created))
 }
 
-// Загрузка DLL и вызов run_download
 fn call_module_download(
     module_id: &str,
     url: &str,
@@ -112,7 +109,6 @@ fn call_module_download(
             .get(b"run_download\0")
             .map_err(|e| format!("Function not found: {}", e))?;
 
-        // Формируем quality с учетом битрейта, если это MP3
         let final_quality = if quality.to_uppercase() == "MP3" {
             if let Some(br) = bitrate {
                 format!("MP3:{}", br)
@@ -153,9 +149,9 @@ async fn run_download(
     quality: String,
     bitrate: Option<String>
 ) -> Result<String, String> {
-    let br = bitrate.as_deref();
+    // Передаем владение bitrate в замыкание, чтобы не было проблем с временем жизни
     tauri::async_runtime::spawn_blocking(move || {
-        call_module_download(&module_id, &url, &quality, br)
+        call_module_download(&module_id, &url, &quality, bitrate.as_deref())
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -180,7 +176,6 @@ async fn batch_download(
         return Ok("List is empty".to_string());
     }
 
-    let br = bitrate.clone();
     let mut success = 0;
     let mut fail = 0;
 
@@ -190,7 +185,7 @@ async fn batch_download(
             continue;
         }
 
-        let res = call_module_download(&module_id, &raw_url, &quality, br.as_deref());
+        let res = call_module_download(&module_id, &raw_url, &quality, bitrate.as_deref());
         match res {
             Ok(_) => {
                 success += 1;
@@ -202,7 +197,6 @@ async fn batch_download(
             }
         }
 
-        // Сохраняем прогресс после каждой ссылки
         let mut out = String::new();
         for l in &lines {
             if !l.trim().is_empty() {
