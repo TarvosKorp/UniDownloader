@@ -78,7 +78,7 @@ fn download_udio(req: &Request) -> Result<(), String> {
     match req.quality.as_str() {
         "128" => { ffmpeg_cmd.arg("-b:a").arg("128k"); }
         "160" => { ffmpeg_cmd.arg("-b:a").arg("160k"); }
-        _ => {}
+        _ => {} // "Max" — без указания битрейта
     }
     
     let status = ffmpeg_cmd.arg(&output_path).status()
@@ -136,11 +136,22 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     let manifest = client.get(manifest_url).send().map_err(|e| e.to_string())?
         .text().map_err(|e| e.to_string())?;
     
+    // PSSH
     let pssh_re = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap();
     let pssh_b64 = pssh_re.captures(&manifest)
         .map(|c| c.get(1).unwrap().as_str().to_string())
         .ok_or("PSSH not found in manifest")?;
     
+    // KID из KEYID=0x...
+    let kid_re = Regex::new(r#"KEYID=0x([a-fA-F0-9]{32})"#).unwrap();
+    let kid_hex = kid_re.captures(&manifest)
+        .map(|c| c.get(1).unwrap().as_str().to_string())
+        .ok_or("KID not found in manifest")?;
+    
+    let kid_bytes = hex::decode(&kid_hex).map_err(|e| e.to_string())?;
+    let kid: [u8; 16] = kid_bytes.try_into().map_err(|_| "KID is not 16 bytes")?;
+    
+    // Загрузка устройства
     let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
         .ok_or("No exe dir")?.to_path_buf();
     let wvd_path = exe_dir.join("Components").join("WidevineKey.wvd");
@@ -150,8 +161,6 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     let cdm = Cdm::new(device);
     
     let pssh = Pssh::from_b64(&pssh_b64).map_err(|e| format!("Invalid PSSH: {:?}", e))?;
-    
-    let kid = pssh.key_ids.first().ok_or("No KID in PSSH")?.clone();
     
     let request = cdm.open().get_license_request(pssh, LicenseType::STREAMING)
         .map_err(|e| format!("License request failed: {:?}", e))?;
@@ -166,7 +175,6 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
         .map_err(|e| format!("License POST failed: {}", e))?;
     
     let lic_data = lic_resp.bytes().map_err(|e| e.to_string())?;
-    
     let keys = request.get_keys(&lic_data).map_err(|e| format!("Failed to get keys: {:?}", e))?;
     
     let content_key = keys.content_key(&kid)

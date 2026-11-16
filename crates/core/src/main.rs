@@ -287,15 +287,29 @@ impl eframe::App for UniApp {
             // Качество и битрейт
             ui.horizontal(|ui| {
                 ui.label("Quality:");
+                
+                // Определяем, выбран ли модуль Udio
+                let is_udio = self.modules.get(self.selected_module)
+                    .map(|m| m.id == "udio").unwrap_or(false);
+
                 egui::ComboBox::from_id_salt("quality_combo")
                     .selected_text(&self.quality)
                     .show_ui(ui, |ui| {
-                        for q in &["144p", "240p", "360p", "480p", "720p", "1080p", "MP3"] {
-                            ui.selectable_value(&mut self.quality, q.to_string(), *q);
+                        if is_udio {
+                            // Для Udio: 128, 160, Max
+                            for q in &["128", "160", "Max"] {
+                                ui.selectable_value(&mut self.quality, q.to_string(), *q);
+                            }
+                        } else {
+                            // Для YouTube и остальных: видео качества + MP3
+                            for q in &["144p", "240p", "360p", "480p", "720p", "1080p", "MP3"] {
+                                ui.selectable_value(&mut self.quality, q.to_string(), *q);
+                            }
                         }
                     });
 
-                if self.quality == "MP3" {
+                // Показываем выбор битрейта только для YouTube в режиме MP3
+                if !is_udio && self.quality == "MP3" {
                     ui.label("Bitrate:");
                     egui::ComboBox::from_id_salt("bitrate_combo")
                         .selected_text(format!("{} kbps", self.bitrate))
