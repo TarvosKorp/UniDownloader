@@ -54,7 +54,11 @@ fn download_udio(req: &Request) -> Result<(), String> {
     fs::write(&encrypted_path, &encrypted_data).map_err(|e| e.to_string())?;
     
     let decrypted_path = temp_dir.join("decrypted.mp4");
-    let mp4decrypt_path = Path::new(&req.ffmpeg_path).parent().unwrap().join("mp4decrypt.exe");
+    
+    // ИСПРАВЛЕНИЕ: mp4decrypt ищем в папке Components, а не рядом с ffmpeg
+    let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
+        .ok_or("No exe dir")?.to_path_buf();
+    let mp4decrypt_path = exe_dir.join("Components").join("mp4decrypt.exe");
     
     let status = Command::new(mp4decrypt_path)
         .arg("--key")
@@ -78,7 +82,7 @@ fn download_udio(req: &Request) -> Result<(), String> {
     match req.quality.as_str() {
         "128" => { ffmpeg_cmd.arg("-b:a").arg("128k"); }
         "160" => { ffmpeg_cmd.arg("-b:a").arg("160k"); }
-        _ => {} // "Max" — без указания битрейта
+        _ => {}
     }
     
     let status = ffmpeg_cmd.arg(&output_path).status()
@@ -136,13 +140,11 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     let manifest = client.get(manifest_url).send().map_err(|e| e.to_string())?
         .text().map_err(|e| e.to_string())?;
     
-    // PSSH
     let pssh_re = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap();
     let pssh_b64 = pssh_re.captures(&manifest)
         .map(|c| c.get(1).unwrap().as_str().to_string())
         .ok_or("PSSH not found in manifest")?;
     
-    // KID из KEYID=0x...
     let kid_re = Regex::new(r#"KEYID=0x([a-fA-F0-9]{32})"#).unwrap();
     let kid_hex = kid_re.captures(&manifest)
         .map(|c| c.get(1).unwrap().as_str().to_string())
@@ -151,7 +153,6 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     let kid_bytes = hex::decode(&kid_hex).map_err(|e| e.to_string())?;
     let kid: [u8; 16] = kid_bytes.try_into().map_err(|_| "KID is not 16 bytes")?;
     
-    // Загрузка устройства
     let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
         .ok_or("No exe dir")?.to_path_buf();
     let wvd_path = exe_dir.join("Components").join("WidevineKey.wvd");
