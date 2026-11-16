@@ -19,23 +19,51 @@ fn get_modules() -> Vec<ModuleInfo> {
     let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
     let modules_dir = exe_dir.join("Modules");
     
+    // ОТЛАДКА: выводим путь
+    println!("[DEBUG] Exe dir: {:?}", exe_dir);
+    println!("[DEBUG] Modules dir: {:?}", modules_dir);
+    
     let mut result = Vec::new();
     
-    if let Ok(entries) = std::fs::read_dir(modules_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let json_path = path.join("module.json");
-                if let Ok(content) = std::fs::read_to_string(&json_path) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                        let id = json["id"].as_str().unwrap_or("unknown").to_string();
-                        let name = json["name"].as_str().unwrap_or("Unknown").to_string();
-                        result.push(ModuleInfo { id, name });
+    match std::fs::read_dir(&modules_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                println!("[DEBUG] Found entry: {:?}", path);
+                
+                if path.is_dir() {
+                    let json_path = path.join("module.json");
+                    println!("[DEBUG] Trying to read: {:?}", json_path);
+                    
+                    match std::fs::read_to_string(&json_path) {
+                        Ok(content) => {
+                            println!("[DEBUG] File content: {}", content);
+                            
+                            match serde_json::from_str::<serde_json::Value>(&content) {
+                                Ok(json) => {
+                                    let id = json["id"].as_str().unwrap_or("unknown").to_string();
+                                    let name = json["name"].as_str().unwrap_or("Unknown").to_string();
+                                    println!("[DEBUG] Parsed module: id={}, name={}", id, name);
+                                    result.push(ModuleInfo { id, name });
+                                }
+                                Err(e) => {
+                                    println!("[DEBUG] Failed to parse JSON: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("[DEBUG] Failed to read module.json: {}", e);
+                        }
                     }
                 }
             }
         }
+        Err(e) => {
+            println!("[DEBUG] Failed to read Modules dir: {}", e);
+        }
     }
+    
+    println!("[DEBUG] Total modules found: {}", result.len());
     result
 }
 
@@ -44,7 +72,6 @@ fn run_download(module_id: String, url: String, quality: String) -> Result<Strin
     let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
     let module_dir = exe_dir.join("Modules").join(&module_id);
     
-    // Исправлено: Cargo создает module_youtube.dll, а не youtube_module.dll
     let dll_path = module_dir.join(format!("module_{}.dll", module_id));
     
     let ytdlp_path = exe_dir.join("Components").join("yt-dlp.exe");
@@ -53,7 +80,6 @@ fn run_download(module_id: String, url: String, quality: String) -> Result<Strin
     
     std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
 
-    // Безопасная загрузка DLL с сохранением в памяти
     unsafe {
         let lib = Library::new(&dll_path).map_err(|e| format!("Failed to load DLL: {}", e))?;
         
@@ -71,7 +97,6 @@ fn run_download(module_id: String, url: String, quality: String) -> Result<Strin
             c_url.as_ptr(), c_quality.as_ptr(), c_output.as_ptr(), c_ytdlp.as_ptr(), c_ffmpeg.as_ptr()
         );
 
-        // Предотвращаем выгрузку DLL до завершения программы
         std::mem::forget(lib);
 
         if result_code == 0 {
