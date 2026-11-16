@@ -5,7 +5,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-// Импорты для widevine
 use widevine::{Cdm, Device, LicenseType, Pssh};
 
 #[no_mangle]
@@ -30,16 +29,10 @@ pub unsafe extern "C" fn run_download(
 }
 
 fn download_udio(req: &Request) -> Result<(), String> {
-    // 1. Получаем манифест и метаданные
     let (manifest_url, metadata) = fetch_manifest_and_meta(&req.url)?;
-    
-    // 2. Получаем ключ (Widevine)
     let key = get_license_key(&manifest_url)?;
-    
-    // 3. Парсим манифест
     let (init_url, segment_urls) = parse_manifest(&manifest_url)?;
     
-    // 4. Скачиваем сегменты во временную папку
     let temp_dir = Path::new(&req.output_dir).join("temp_segments");
     fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
     
@@ -53,7 +46,6 @@ fn download_udio(req: &Request) -> Result<(), String> {
         segment_paths.push(seg_path);
     }
     
-    // 5. Склеиваем и расшифровываем
     let encrypted_path = temp_dir.join("encrypted.mp4");
     let mut encrypted_data = fs::read(&init_path).map_err(|e| e.to_string())?;
     for seg in &segment_paths {
@@ -62,7 +54,6 @@ fn download_udio(req: &Request) -> Result<(), String> {
     fs::write(&encrypted_path, &encrypted_data).map_err(|e| e.to_string())?;
     
     let decrypted_path = temp_dir.join("decrypted.mp4");
-    // mp4decrypt лежит в Components, путь к нему можно вычислить из ffmpeg_path
     let mp4decrypt_path = Path::new(&req.ffmpeg_path).parent().unwrap().join("mp4decrypt.exe");
     
     let status = Command::new(mp4decrypt_path)
@@ -77,7 +68,6 @@ fn download_udio(req: &Request) -> Result<(), String> {
         return Err("mp4decrypt failed".to_string());
     }
     
-    // 6. Конвертация в MP3 с нужным битрейтом
     let safe_title = sanitize_filename(&metadata.title);
     let output_path = Path::new(&req.output_dir).join(format!("{}.mp3", safe_title));
     
@@ -88,7 +78,7 @@ fn download_udio(req: &Request) -> Result<(), String> {
     match req.quality.as_str() {
         "128" => { ffmpeg_cmd.arg("-b:a").arg("128k"); }
         "160" => { ffmpeg_cmd.arg("-b:a").arg("160k"); }
-        _ => { /* "Max" — не указываем битрейт, ffmpeg выберет VBR по умолчанию */ }
+        _ => {}
     }
     
     let status = ffmpeg_cmd.arg(&output_path).status()
@@ -98,27 +88,21 @@ fn download_udio(req: &Request) -> Result<(), String> {
         return Err("ffmpeg failed".to_string());
     }
     
-    // 7. Очистка
     fs::remove_dir_all(&temp_dir).ok();
-    
     Ok(())
 }
-
-// ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
 
 fn fetch_manifest_and_meta(track_url: &str) -> Result<(String, Metadata), String> {
     let client = build_client()?;
     let html_text = client.get(track_url).send().map_err(|e| e.to_string())?
         .text().map_err(|e| e.to_string())?;
     
-    // Ищем UUID
     let uuid_re = Regex::new(r#"\\?"track\\?"\s*:\s*\{\s*\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#)
         .map_err(|e| e.to_string())?;
     
     let content_id = if let Some(caps) = uuid_re.captures(&html_text) {
         caps.get(1).unwrap().as_str().to_string()
     } else {
-        // Запасной вариант
         let fallback_re = Regex::new(r#"\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#)
             .map_err(|e| e.to_string())?;
         fallback_re.captures(&html_text)
@@ -128,7 +112,6 @@ fn fetch_manifest_and_meta(track_url: &str) -> Result<(String, Metadata), String
     
     let manifest_url = format!("https://stream.udio.com/api/v2/audio-stream/content/{}/manifest.m3u8", content_id);
     
-    // Метаданные
     let title_re = Regex::new(r#"<meta\s+property=["']og:title["']\s+content=["']([^"']+)"#).unwrap();
     let image_re = Regex::new(r#"<meta\s+property=["']og:image["']\s+content=["']([^"']+)"#).unwrap();
     
@@ -136,7 +119,6 @@ fn fetch_manifest_and_meta(track_url: &str) -> Result<(String, Metadata), String
         .unwrap_or_else(|| "Unknown Track".to_string());
     let cover_url = image_re.captures(&html_text).map(|c| c.get(1).unwrap().as_str().to_string());
     
-    // Декодируем HTML-сущности (простая замена)
     let raw_title = raw_title.replace("&#x27;", "'").replace("&quot;", "\"").replace("&amp;", "&");
     let raw_title = raw_title.replace(" | Udio", "").trim().to_string();
     
@@ -154,13 +136,11 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     let manifest = client.get(manifest_url).send().map_err(|e| e.to_string())?
         .text().map_err(|e| e.to_string())?;
     
-    // Извлекаем PSSH из манифеста
     let pssh_re = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap();
     let pssh_b64 = pssh_re.captures(&manifest)
         .map(|c| c.get(1).unwrap().as_str().to_string())
         .ok_or("PSSH not found in manifest")?;
     
-    // Загружаем устройство из .wvd
     let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
         .ok_or("No exe dir")?.to_path_buf();
     let wvd_path = exe_dir.join("Components").join("WidevineKey.wvd");
@@ -171,14 +151,13 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     
     let pssh = Pssh::from_b64(&pssh_b64).map_err(|e| format!("Invalid PSSH: {:?}", e))?;
     
-    // ВАЖНО: получаем KID из PSSH. У Pssh есть публичное поле key_ids: Vec<[u8; 16]>
-    let kid = pssh.key_ids.first().ok_or("No KID in PSSH")?;
+    // KID уникален для каждого трека, берём первый из PSSH
+    let kid = pssh.key_ids.first().ok_or("No KID in PSSH")?.clone();
     
     let request = cdm.open().get_license_request(pssh, LicenseType::STREAMING)
         .map_err(|e| format!("License request failed: {:?}", e))?;
     let challenge = request.challenge().map_err(|e| format!("Challenge failed: {:?}", e))?;
     
-    // Отправляем challenge на сервер Udio
     let lic_resp = client.post("https://stream.udio.com/drm/license?type=widevine")
         .header("Content-Type", "application/octet-stream")
         .header("Origin", "https://www.udio.com")
@@ -191,9 +170,9 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     
     let keys = request.get_keys(&lic_data).map_err(|e| format!("Failed to get keys: {:?}", e))?;
     
-    // ИСПОЛЬЗУЕМ content_key(kid) ВМЕСТО iter()
-    let content_key = keys.content_key(kid)
-        .ok_or("Content key not found for KID")?;
+    // content_key возвращает Result, поэтому используем map_err
+    let content_key = keys.content_key(&kid)
+        .map_err(|e| format!("Content key not found for KID: {:?}", e))?;
     
     Ok(hex::encode(content_key.key))
 }
@@ -239,7 +218,6 @@ fn build_client() -> Result<reqwest::blocking::Client, String> {
     let mut builder = reqwest::blocking::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
     
-    // Прокси (читаем из переменных окружения, как в Python-версии)
     if let Ok(proxy) = std::env::var("HTTP_PROXY") {
         builder = builder.proxy(reqwest::Proxy::http(&proxy).map_err(|e| e.to_string())?);
     }
