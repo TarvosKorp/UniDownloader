@@ -1,7 +1,7 @@
 name: Build UniDownloader
 
 on:
-  workflow_dispatch: # Только ручной запуск
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -14,6 +14,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
 
       - name: Cache Cargo
         uses: swatinem/rust-cache@v2

@@ -2,7 +2,7 @@
 name = "core"
 version.workspace = true
 edition.workspace = true
-build = "build.rs" # Добавляем строку
+build = "build.rs"
 
 [[bin]]
 name = "UniDownloader"
@@ -12,6 +12,10 @@ path = "src/main.rs"
 module-api = { path = "../module-api" }
 module-udio = { path = "../module-udio" }
 module-youtube = { path = "../module-youtube" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [build-dependencies]
-winres = "0.1" # Добавляем крейт для иконок
+winres = "0.1"
+tauri-build = { version = "2", features = [] } # Добавлено

@@ -1,0 +1,14 @@
+body {
+    background-color: #1e1e1e;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+}
+.container {
+    max-width: 500px;
+    margin: 0 auto;
+}
+h1 {
+    color: #00a8ff; /* Голубой акцент */
+}
