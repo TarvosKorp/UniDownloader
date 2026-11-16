@@ -2,7 +2,7 @@ use module_api::{guard, Request};
 use regex::Regex;
 use std::ffi::c_char;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 // Импорты для widevine
@@ -161,14 +161,18 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
         .ok_or("PSSH not found in manifest")?;
     
     // Загружаем устройство из .wvd
-    let wvd_path = Path::new(&std::env::current_exe().unwrap()).parent().unwrap()
-        .join("Components").join("WidevineKey.wvd");
+    let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
+        .ok_or("No exe dir")?.to_path_buf();
+    let wvd_path = exe_dir.join("Components").join("WidevineKey.wvd");
     
     let device = Device::read_wvd(std::fs::File::open(wvd_path).map_err(|e| e.to_string())?)
         .map_err(|e| format!("Failed to read WVD: {:?}", e))?;
     let cdm = Cdm::new(device);
     
     let pssh = Pssh::from_b64(&pssh_b64).map_err(|e| format!("Invalid PSSH: {:?}", e))?;
+    
+    // ВАЖНО: получаем KID из PSSH. У Pssh есть публичное поле key_ids: Vec<[u8; 16]>
+    let kid = pssh.key_ids.first().ok_or("No KID in PSSH")?;
     
     let request = cdm.open().get_license_request(pssh, LicenseType::STREAMING)
         .map_err(|e| format!("License request failed: {:?}", e))?;
@@ -187,13 +191,11 @@ fn get_license_key(manifest_url: &str) -> Result<String, String> {
     
     let keys = request.get_keys(&lic_data).map_err(|e| format!("Failed to get keys: {:?}", e))?;
     
-    // Ищем Content Key
-    let content_key = keys.iter()
-        .find(|k| format!("{:?}", k.r#type).contains("CONTENT"))
-        .map(|k| hex::encode(k.key))
-        .ok_or("Content key not found")?;
+    // ИСПОЛЬЗУЕМ content_key(kid) ВМЕСТО iter()
+    let content_key = keys.content_key(kid)
+        .ok_or("Content key not found for KID")?;
     
-    Ok(content_key)
+    Ok(hex::encode(content_key.key))
 }
 
 fn parse_manifest(manifest_url: &str) -> Result<(String, Vec<String>), String> {
