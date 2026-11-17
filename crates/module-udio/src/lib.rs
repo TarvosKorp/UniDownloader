@@ -1,248 +1,255 @@
-use module_api::{guard, Request};
+use module_api::{guard, hide_console, Request};
+use id3::{frame::{Content, Picture, PictureType}, Tag, TagLike, Version};
 use regex::Regex;
-use std::ffi::c_char;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-
+use reqwest::{blocking::Client, Url};
+use std::{ffi::c_char, fs, io::Write, path::{Path, PathBuf}, process::Command, thread};
+use tempfile::Builder;
 use widevine::{Cdm, Device, LicenseType, Pssh};
 
+const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const WORKERS: usize = 4;
+const RETRIES: usize = 3;
+
 #[no_mangle]
-pub extern "C" fn module_abi_version() -> u32 {
-    module_api::ABI_VERSION
-}
+pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }
 
 #[no_mangle]
 pub unsafe extern "C" fn run_download(
-    url: *const c_char,
-    quality: *const c_char,
-    output_dir: *const c_char,
-    _ytdlp_path: *const c_char,
-    ffmpeg_path: *const c_char,
-    err_buf: *mut c_char,
-    err_buf_len: usize,
+    url: *const c_char, quality: *const c_char, output_dir: *const c_char,
+    ytdlp_path: *const c_char, ffmpeg_path: *const c_char,
+    err_buf: *mut c_char, err_buf_len: usize,
 ) -> i32 {
     guard(err_buf, err_buf_len, || {
-        let req = Request::from_raw(url, quality, output_dir, _ytdlp_path, ffmpeg_path)?;
+        let req = Request::from_raw(url, quality, output_dir, ytdlp_path, ffmpeg_path)?;
         download_udio(&req)
     })
 }
 
 fn download_udio(req: &Request) -> Result<(), String> {
-    let (manifest_url, metadata) = fetch_manifest_and_meta(&req.url)?;
-    let key = get_license_key(&manifest_url)?;
-    let (init_url, segment_urls) = parse_manifest(&manifest_url)?;
-    
-    let temp_dir = Path::new(&req.output_dir).join("temp_segments");
-    fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-    
-    let init_path = temp_dir.join("init.mp4");
-    download_file(&init_url, &init_path)?;
-    
-    let mut segment_paths = Vec::new();
-    for (i, url) in segment_urls.iter().enumerate() {
-        let seg_path = temp_dir.join(format!("segment_{}.m4s", i + 1));
-        download_file(url, &seg_path)?;
-        segment_paths.push(seg_path);
+    let out = Path::new(&req.output_dir);
+    fs::create_dir_all(out).map_err(|e| format!("Cannot create output directory: {e}"))?;
+    let temp = Builder::new().prefix("udio-track-").tempdir_in(out)
+        .map_err(|e| format!("Cannot create temporary directory: {e}"))?;
+    let dir = temp.path();
+    let client = build_client()?;
+    let (manifest_url, meta) = fetch_metadata(&client, &req.url)?;
+    let (init_url, segments) = parse_manifest(&client, &manifest_url)?;
+    let key = get_key(&client, &manifest_url)?;
+
+    let init = dir.join("init.mp4");
+    download_file(&client, &init_url, &init)?;
+    let segment_paths = download_segments(&client, &segments, dir)?;
+    let encrypted = dir.join("encrypted.mp4");
+    {
+        let mut dst = fs::File::create(&encrypted).map_err(|e| e.to_string())?;
+        for part in std::iter::once(&init).chain(segment_paths.iter()) {
+            let mut src = fs::File::open(part).map_err(|e| format!("Cannot open {}: {e}", part.display()))?;
+            std::io::copy(&mut src, &mut dst).map_err(|e| format!("Cannot assemble segments: {e}"))?;
+        }
+        dst.flush().map_err(|e| e.to_string())?;
     }
-    
-    let encrypted_path = temp_dir.join("encrypted.mp4");
-    let mut encrypted_data = fs::read(&init_path).map_err(|e| e.to_string())?;
-    for seg in &segment_paths {
-        encrypted_data.extend_from_slice(&fs::read(seg).map_err(|e| e.to_string())?);
-    }
-    fs::write(&encrypted_path, &encrypted_data).map_err(|e| e.to_string())?;
-    
-    let decrypted_path = temp_dir.join("decrypted.mp4");
-    
-    // ИСПРАВЛЕНИЕ: mp4decrypt ищем в папке Components, а не рядом с ffmpeg
-    let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
-        .ok_or("No exe dir")?.to_path_buf();
-    let mp4decrypt_path = exe_dir.join("Components").join("mp4decrypt.exe");
-    
-    let status = Command::new(mp4decrypt_path)
-        .arg("--key")
-        .arg(format!("1:{}", key))
-        .arg(&encrypted_path)
-        .arg(&decrypted_path)
-        .status()
-        .map_err(|e| format!("Failed to run mp4decrypt: {}", e))?;
-    
-    if !status.success() {
-        return Err("mp4decrypt failed".to_string());
-    }
-    
-    let safe_title = sanitize_filename(&metadata.title);
-    let output_path = Path::new(&req.output_dir).join(format!("{}.mp3", safe_title));
-    
-    let mut ffmpeg_cmd = Command::new(&req.ffmpeg_path);
-    ffmpeg_cmd.arg("-y").arg("-i").arg(&decrypted_path).arg("-vn");
-    ffmpeg_cmd.arg("-acodec").arg("libmp3lame");
-    
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let decrypt_exe = exe.parent().ok_or("Cannot locate application directory")?
+        .join("Components").join("mp4decrypt.exe");
+    if !decrypt_exe.is_file() { return Err(format!("mp4decrypt.exe not found: {}", decrypt_exe.display())); }
+    let decrypted = dir.join("decrypted.mp4");
+    let mut cmd = Command::new(&decrypt_exe);
+    hide_console(&mut cmd);
+    let result = cmd.arg("--key").arg(format!("1:{key}")).arg(&encrypted).arg(&decrypted)
+        .output().map_err(|e| format!("Cannot start mp4decrypt: {e}"))?;
+    if !result.status.success() { return Err(process_error("mp4decrypt", &result.status, &result.stderr)); }
+    if !decrypted.is_file() { return Err("mp4decrypt produced no output file".into()); }
+
+    let mp3 = dir.join("track.mp3");
+    let mut ff = Command::new(&req.ffmpeg_path);
+    hide_console(&mut ff);
+    ff.arg("-y").arg("-i").arg(&decrypted).arg("-vn").arg("-acodec").arg("libmp3lame");
     match req.quality.as_str() {
-        "128" => { ffmpeg_cmd.arg("-b:a").arg("128k"); }
-        "160" => { ffmpeg_cmd.arg("-b:a").arg("160k"); }
-        _ => {}
+        "128" => { ff.arg("-b:a").arg("128k"); }
+        "160" => { ff.arg("-b:a").arg("160k"); }
+        _ => { ff.arg("-q:a").arg("2"); } // Same VBR quality as the working Python downloader.
     }
-    
-    let status = ffmpeg_cmd.arg(&output_path).status()
-        .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
-    
-    if !status.success() {
-        return Err("ffmpeg failed".to_string());
+    let result = ff.arg(&mp3).output().map_err(|e| format!("Cannot start FFmpeg: {e}"))?;
+    if !result.status.success() { return Err(process_error("FFmpeg", &result.status, &result.stderr)); }
+    if !mp3.is_file() { return Err("FFmpeg produced no MP3 file".into()); }
+
+    let cover = meta.cover.as_deref().and_then(|u| download_bytes(&client, u).ok());
+    write_tags(&mp3, &meta, cover, &req.url)?;
+    let final_path = publish_unique(out, &sanitize(&meta.title), &mp3)?;
+    drop(temp);
+    Ok(format!("Saved: {}", final_path.display()))
+}
+
+fn build_client() -> Result<Client, String> {
+    let mut b = Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30));
+    if let Ok(p) = std::env::var("HTTP_PROXY") {
+        if !p.trim().is_empty() { b = b.proxy(reqwest::Proxy::http(&p).map_err(|e| e.to_string())?); }
     }
-    
-    fs::remove_dir_all(&temp_dir).ok();
-    Ok(())
+    if let Ok(p) = std::env::var("HTTPS_PROXY") {
+        if !p.trim().is_empty() { b = b.proxy(reqwest::Proxy::https(&p).map_err(|e| e.to_string())?); }
+    }
+    b.build().map_err(|e| format!("Cannot create HTTP client: {e}"))
 }
 
-fn fetch_manifest_and_meta(track_url: &str) -> Result<(String, Metadata), String> {
-    let client = build_client()?;
-    let html_text = client.get(track_url).send().map_err(|e| e.to_string())?
+fn fetch_metadata(c: &Client, track: &str) -> Result<(String, Metadata), String> {
+    let html = c.get(track).send().map_err(|e| format!("Track page request failed: {e}"))?
+        .error_for_status().map_err(|e| format!("Track page HTTP error: {e}"))?
         .text().map_err(|e| e.to_string())?;
-    
-    let uuid_re = Regex::new(r#"\\?"track\\?"\s*:\s*\{\s*\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#)
-        .map_err(|e| e.to_string())?;
-    
-    let content_id = if let Some(caps) = uuid_re.captures(&html_text) {
-        caps.get(1).unwrap().as_str().to_string()
-    } else {
-        let fallback_re = Regex::new(r#"\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#)
-            .map_err(|e| e.to_string())?;
-        fallback_re.captures(&html_text)
-            .map(|c| c.get(1).unwrap().as_str().to_string())
-            .ok_or("Could not find content ID")?
-    };
-    
-    let manifest_url = format!("https://stream.udio.com/api/v2/audio-stream/content/{}/manifest.m3u8", content_id);
-    
-    let title_re = Regex::new(r#"<meta\s+property=["']og:title["']\s+content=["']([^"']+)"#).unwrap();
-    let image_re = Regex::new(r#"<meta\s+property=["']og:image["']\s+content=["']([^"']+)"#).unwrap();
-    
-    let raw_title = title_re.captures(&html_text).map(|c| c.get(1).unwrap().as_str().to_string())
-        .unwrap_or_else(|| "Unknown Track".to_string());
-    let cover_url = image_re.captures(&html_text).map(|c| c.get(1).unwrap().as_str().to_string());
-    
-    let raw_title = raw_title.replace("&#x27;", "'").replace("&quot;", "\"").replace("&amp;", "&");
-    let raw_title = raw_title.replace(" | Udio", "").trim().to_string();
-    
-    let (artist, title) = if let Some(pos) = raw_title.find(" - ") {
-        (raw_title[..pos].trim().to_string(), raw_title[pos+3..].trim().to_string())
-    } else {
-        ("Unknown Artist".to_string(), raw_title)
-    };
-    
-    Ok((manifest_url, Metadata { title, artist, cover_url }))
+    let uuid = Regex::new(r#"\\?"track\\?"\s*:\s*\{\s*\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#).unwrap();
+    let fallback = Regex::new(r#"\\?"id\\?"\s*:\s*\\?"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\\?""#).unwrap();
+    let id = uuid.captures(&html).or_else(|| fallback.captures(&html))
+        .and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+        .ok_or("Could not find Udio track ID")?;
+    let title_re = Regex::new(r#"(?i)<meta\s+property=["']og:title["']\s+content=["']([^"']+)"#).unwrap();
+    let image_re = Regex::new(r#"(?i)<meta\s+property=["']og:image["']\s+content=["']([^"']+)"#).unwrap();
+    let tags_re = Regex::new(r#"\\?"tags\\?"\s*:\s*\[([^\]]*)\]"#).unwrap();
+    let item_re = Regex::new(r#"\\?"([^"\\]+)\\?""#).unwrap();
+    let raw = title_re.captures(&html).map(|c| decode(c.get(1).unwrap().as_str()))
+        .unwrap_or_else(|| "Unknown Track".into()).replace(" | Udio", "");
+    let (artist, title) = raw.split_once(" - ").map(|(a,t)| (a.trim().to_string(),t.trim().to_string()))
+        .unwrap_or_else(|| ("Unknown Artist".into(),raw.trim().into()));
+    let cover = image_re.captures(&html).map(|c| decode(c.get(1).unwrap().as_str()));
+    let tags = tags_re.captures(&html).map(|c| item_re.captures_iter(c.get(1).unwrap().as_str())
+        .map(|m| decode(m.get(1).unwrap().as_str())).collect()).unwrap_or_default();
+    Ok((format!("https://stream.udio.com/api/v2/audio-stream/content/{id}/manifest.m3u8"),
+        Metadata { title, artist, tags, cover }))
 }
 
-fn get_license_key(manifest_url: &str) -> Result<String, String> {
-    let client = build_client()?;
-    let manifest = client.get(manifest_url).send().map_err(|e| e.to_string())?
-        .text().map_err(|e| e.to_string())?;
-    
-    let pssh_re = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap();
-    let pssh_b64 = pssh_re.captures(&manifest)
-        .map(|c| c.get(1).unwrap().as_str().to_string())
-        .ok_or("PSSH not found in manifest")?;
-    
-    let kid_re = Regex::new(r#"KEYID=0x([a-fA-F0-9]{32})"#).unwrap();
-    let kid_hex = kid_re.captures(&manifest)
-        .map(|c| c.get(1).unwrap().as_str().to_string())
-        .ok_or("KID not found in manifest")?;
-    
-    let kid_bytes = hex::decode(&kid_hex).map_err(|e| e.to_string())?;
-    let kid: [u8; 16] = kid_bytes.try_into().map_err(|_| "KID is not 16 bytes")?;
-    
-    let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent()
-        .ok_or("No exe dir")?.to_path_buf();
-    let wvd_path = exe_dir.join("Components").join("WidevineKey.wvd");
-    
-    let device = Device::read_wvd(std::fs::File::open(wvd_path).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("Failed to read WVD: {:?}", e))?;
-    let cdm = Cdm::new(device);
-    
-    let pssh = Pssh::from_b64(&pssh_b64).map_err(|e| format!("Invalid PSSH: {:?}", e))?;
-    
-    let request = cdm.open().get_license_request(pssh, LicenseType::STREAMING)
-        .map_err(|e| format!("License request failed: {:?}", e))?;
-    let challenge = request.challenge().map_err(|e| format!("Challenge failed: {:?}", e))?;
-    
-    let lic_resp = client.post("https://stream.udio.com/drm/license?type=widevine")
-        .header("Content-Type", "application/octet-stream")
-        .header("Origin", "https://www.udio.com")
-        .header("Referer", "https://www.udio.com/")
-        .body(challenge)
-        .send()
-        .map_err(|e| format!("License POST failed: {}", e))?;
-    
-    let lic_data = lic_resp.bytes().map_err(|e| e.to_string())?;
-    let keys = request.get_keys(&lic_data).map_err(|e| format!("Failed to get keys: {:?}", e))?;
-    
-    let content_key = keys.content_key(&kid)
-        .map_err(|e| format!("Content key not found for KID: {:?}", e))?;
-    
-    Ok(hex::encode(content_key.key.clone()))
-}
-
-fn parse_manifest(manifest_url: &str) -> Result<(String, Vec<String>), String> {
-    let client = build_client()?;
-    let manifest = client.get(manifest_url).send().map_err(|e| e.to_string())?
-        .text().map_err(|e| e.to_string())?;
-    
-    let base_url = "https://stream.udio.com";
-    let mut init_url = String::new();
-    let mut segments = Vec::new();
-    
-    for line in manifest.lines() {
-        let line = line.trim();
+fn parse_manifest(c: &Client, url: &str) -> Result<(String, Vec<String>), String> {
+    let text = c.get(url).send().map_err(|e| e.to_string())?.error_for_status()
+        .map_err(|e| format!("Manifest HTTP error: {e}"))?.text().map_err(|e| e.to_string())?;
+    let base = Url::parse("https://stream.udio.com/").unwrap();
+    let map = Regex::new(r#"URI="([^"]+)""#).unwrap();
+    let mut init = None;
+    let mut parts = Vec::new();
+    for line in text.lines().map(str::trim) {
         if line.starts_with("#EXT-X-MAP:") {
-            let re = Regex::new(r#"URI="([^"]+)"#).unwrap();
-            if let Some(caps) = re.captures(line) {
-                let uri = caps.get(1).unwrap().as_str();
-                init_url = format!("{}{}", base_url, uri);
-            }
+            let uri = map.captures(line).and_then(|c| c.get(1)).ok_or("No init URI in manifest")?.as_str();
+            init = Some(base.join(uri).map_err(|e| e.to_string())?.to_string());
         } else if !line.is_empty() && !line.starts_with('#') {
-            segments.push(format!("{}{}", base_url, line));
+            parts.push(base.join(line).map_err(|e| e.to_string())?.to_string());
         }
     }
-    
-    if init_url.is_empty() || segments.is_empty() {
-        return Err("Failed to parse manifest".to_string());
+    Ok((init.ok_or("No init segment in manifest")?,
+        if parts.is_empty() { return Err("No media segments in manifest".into()); } else { parts }))
+}
+
+fn get_key(c: &Client, url: &str) -> Result<String, String> {
+    let manifest = c.get(url).send().map_err(|e| e.to_string())?.error_for_status()
+        .map_err(|e| format!("License manifest HTTP error: {e}"))?.text().map_err(|e| e.to_string())?;
+    let pssh = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap().captures(&manifest)
+        .and_then(|m| m.get(1)).map(|m| m.as_str()).ok_or("PSSH not found")?;
+    let kid = Regex::new(r#"KEYID=0x([a-fA-F0-9]{32})"#).unwrap().captures(&manifest)
+        .and_then(|m| m.get(1)).map(|m| m.as_str()).ok_or("KID not found")?;
+    let kid: [u8;16] = hex::decode(kid).map_err(|e| e.to_string())?.try_into().map_err(|_| "Invalid KID")?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let wvd = exe.parent().ok_or("No application directory")?.join("Components").join("WidevineKey.wvd");
+    let device = Device::read_wvd(fs::File::open(&wvd).map_err(|e| format!("Cannot open {}: {e}",wvd.display()))?)
+        .map_err(|e| format!("Cannot read Widevine device: {e:?}"))?;
+    let request = Cdm::new(device).open().get_license_request(Pssh::from_b64(pssh).map_err(|e| format!("{e:?}"))?, LicenseType::STREAMING)
+        .map_err(|e| format!("License challenge creation failed: {e:?}"))?;
+    let challenge = request.challenge().map_err(|e| format!("Challenge error: {e:?}"))?;
+    let response = c.post("https://stream.udio.com/drm/license?type=widevine")
+        .header("User-Agent",UA).header("Content-Type","application/octet-stream")
+        .header("Origin","https://www.udio.com").header("Referer","https://www.udio.com/")
+        .body(challenge).send().map_err(|e| format!("License POST failed: {e}"))?
+        .error_for_status().map_err(|e| format!("License server HTTP error: {e}"))?;
+    let data = response.bytes().map_err(|e| e.to_string())?;
+    let keys = request.get_keys(&data).map_err(|e| format!("Cannot parse license: {e:?}"))?;
+    let key = keys.content_key(&kid).map_err(|e| format!("Content key for KID unavailable: {e:?}"))?;
+    // Do not include the content key, challenge or license body in diagnostics.
+    Ok(hex::encode(key.key.clone()))
+}
+
+fn download_segments(c: &Client, urls: &[String], dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut ordered: Vec<Option<PathBuf>> = vec![None; urls.len()];
+    for start in (0..urls.len()).step_by(WORKERS) {
+        let end = (start + WORKERS).min(urls.len());
+        let results = thread::scope(|scope| {
+            let mut jobs = Vec::new();
+            for i in start..end {
+                let url = &urls[i];
+                let path = dir.join(format!("segment_{:06}.m4s",i+1));
+                jobs.push((i,scope.spawn(move || { download_file(c,url,&path)?; Ok::<_,String>(path) })));
+            }
+            jobs.into_iter().map(|(i,j)| {
+                let p = j.join().map_err(|_| format!("Segment worker {} panicked",i+1))??;
+                Ok((i,p))
+            }).collect::<Result<Vec<_>,String>>()
+        })?;
+        for (i,p) in results { ordered[i] = Some(p); }
     }
-    
-    Ok((init_url, segments))
+    ordered.into_iter().enumerate().map(|(i,p)| p.ok_or_else(|| format!("Segment {} missing",i+1))).collect()
 }
 
-fn download_file(url: &str, path: &Path) -> Result<(), String> {
-    let client = build_client()?;
-    let mut resp = client.get(url).send().map_err(|e| e.to_string())?;
-    let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
-    resp.copy_to(&mut file).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn build_client() -> Result<reqwest::blocking::Client, String> {
-    let mut builder = reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-    
-    if let Ok(proxy) = std::env::var("HTTP_PROXY") {
-        builder = builder.proxy(reqwest::Proxy::http(&proxy).map_err(|e| e.to_string())?);
+fn download_file(c: &Client, url: &str, path: &Path) -> Result<(), String> {
+    let mut last = String::new();
+    for attempt in 1..=RETRIES {
+        let result = (|| {
+            let mut r = c.get(url).send().map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
+            let mut f = fs::File::create(path).map_err(|e| e.to_string())?;
+            r.copy_to(&mut f).map_err(|e| e.to_string())?;
+            f.flush().map_err(|e| e.to_string())
+        })();
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) => { last=e; let _=fs::remove_file(path); if attempt<RETRIES { thread::sleep(std::time::Duration::from_millis(300*attempt as u64)); } }
+        }
     }
-    if let Ok(proxy) = std::env::var("HTTPS_PROXY") {
-        builder = builder.proxy(reqwest::Proxy::https(&proxy).map_err(|e| e.to_string())?);
+    Err(format!("Segment download failed after {RETRIES} attempts: {url}: {last}"))
+}
+
+fn download_bytes(c: &Client,url: &str)->Result<Vec<u8>,String>{
+    c.get(url).send().map_err(|e|e.to_string())?.error_for_status().map_err(|e|e.to_string())?
+        .bytes().map(|b|b.to_vec()).map_err(|e|e.to_string())
+}
+
+fn write_tags(path:&Path,m:&Metadata,cover:Option<Vec<u8>>,url:&str)->Result<(),String>{
+    let mut tag=Tag::new();
+    tag.set_title(m.title.clone()); tag.set_artist(m.artist.clone());
+    if !m.tags.is_empty(){tag.set_genre(m.tags.join(", "));}
+    tag.add_frame(id3::Frame::with_content("WOAR",Content::Link(url.to_string())));
+    if let Some(data)=cover{
+        tag.add_frame(id3::Frame::with_content("APIC",Content::Picture(Picture{
+            mime_type:"image/jpeg".into(),picture_type:PictureType::CoverFront,
+            description:"Cover".into(),data
+        })));
     }
-    
-    builder.build().map_err(|e| e.to_string())
+    tag.write_to_path(path,Version::Id3v24).map_err(|e|format!("Cannot write ID3 tags: {e}"))
 }
 
-fn sanitize_filename(name: &str) -> String {
-    let re = Regex::new(r#"[<>:"/\\|?*]"#).unwrap();
-    let cleaned = re.replace_all(name, "_");
-    if cleaned.len() > 100 { cleaned[..100].to_string() } else { cleaned.to_string() }
+fn publish_unique(dir:&Path,base:&str,source:&Path)->Result<PathBuf,String>{
+    for n in 0..10000 {
+        let name=if n==0{format!("{base}.mp3")}else{format!("{base} {n}.mp3")};
+        let target=dir.join(name);
+        // Atomic same-volume hard-link creation: never overwrite an existing file.
+        match fs::hard_link(source,&target){
+            Ok(())=>return Ok(target),
+            Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,
+            Err(e)=>return Err(format!("Cannot publish {}: {e}",target.display()))
+        }
+    }
+    Err("No free output filename after 10000 attempts".into())
 }
 
-struct Metadata {
-    title: String,
-    artist: String,
-    cover_url: Option<String>,
+fn process_error(name:&str,status:&std::process::ExitStatus,stderr:&[u8])->String{
+    let code=status.code().map_or("unknown".into(),|c|c.to_string());
+    let details=String::from_utf8_lossy(stderr);
+    if details.trim().is_empty(){format!("{name} failed (exit code {code}); stderr empty")}
+    else{format!("{name} failed (exit code {code}): {}",details.trim())}
+}
+fn sanitize(s:&str)->String{
+    let cleaned=Regex::new(r#"[<>:"/\\|?*]"#).unwrap().replace_all(s,"_").to_string();
+    let result:String=cleaned.trim_matches(|c:char|c=='.'||c.is_whitespace()).chars().take(100).collect();
+    if result.is_empty(){"Unknown Track".into()}else{result}
+}
+fn decode(s:&str)->String{s.replace("&amp;","&").replace("&quot;","\"").replace("&#x27;","'").replace("&#39;","'").replace("&lt;","<").replace("&gt;",">")}
+struct Metadata{title:String,artist:String,tags:Vec<String>,cover:Option<String>}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+    #[test] fn sanitizes_windows_filename(){assert_eq!(sanitize(r#"a:b/c*?"#),"a_b_c__");assert_eq!(sanitize("..."),"Unknown Track");}
+    #[test] fn decodes_entities(){assert_eq!(decode("A &amp; B &#x27;x&#x27;"),"A & B 'x'");}
 }
