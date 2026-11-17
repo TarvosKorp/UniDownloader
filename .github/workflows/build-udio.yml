@@ -1,0 +1,34 @@
+name: Build Udio Module
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-udio:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo
+        uses: swatinem/rust-cache@v2
+
+      - name: Build Udio DLL
+        run: cargo build --release -p module-udio
+
+      - name: Upload Udio artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniDownloader-Udio-Windows
+          if-no-files-found: error
+          path: |
+            target/release/module_udio.dll
+            Modules/udio/module.json
