@@ -280,12 +280,14 @@ fn create_shortcuts() -> Result<String, String> {
         let safe_name: String = module.name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
         let shortcut_path = base.join(format!("{safe_name}.lnk"));
         let icon = folder.join("Icon.ico");
-        let shortcut = lnks::ShortcutBuilder::new(exe.clone())
+        let mut builder = lnks::ShortcutBuilder::new(exe.clone())
             .arguments(format!("--module {}", module.id))
             .working_dir(base.to_string_lossy().to_string())
-            .description(format!("Launch {} downloader", module.name))
-            .icon(lnks::Icon::new(icon))
-            .build();
+            .description(format!("Launch {} downloader", module.name));
+        if icon.is_file() {
+            builder = builder.icon(lnks::Icon::new(icon));
+        }
+        let shortcut = builder.build();
         shortcut.save(&shortcut_path).map_err(|e| format!("Cannot create shortcut for {}: {e}", module.name))?;
         created += 1;
     }
