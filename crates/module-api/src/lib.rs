@@ -40,7 +40,11 @@ pub const SYM_MODULE_UI_JSON: &[u8] = b"module_ui_json\0";
 pub const RESULT_OK: i32 = 0;
 pub const RESULT_ERR: i32 = 1;
 
-pub type AbiVersionFn = unsafe extern "C" fn() -> u32;\n\n/// Returns a module-owned JSON description of its controls. The returned\n/// pointer must refer to a static, null-terminated UTF-8 string in the DLL.\npub type ModuleUiJsonFn = unsafe extern "C" fn() -> *const c_char;
+pub type AbiVersionFn = unsafe extern "C" fn() -> u32;
+
+/// Returns a module-owned JSON description of its controls. The returned
+/// pointer must refer to a static, null-terminated UTF-8 string in the DLL.
+pub type ModuleUiJsonFn = unsafe extern "C" fn() -> *const c_char;
 
 /// `err_buf`/`err_buf_len` — буфер, выделенный ядром. При ошибке модуль пишет
 /// туда текст (UTF-8, с нулём в конце), и ядро показывает его пользователю.
