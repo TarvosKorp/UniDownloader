@@ -2,23 +2,21 @@
 
 UniDownloader uses one Windows executable as a launcher and module host. Each downloader is built as a separate DLL and is started in its own process through a shortcut.
 
-## Build
+## Build on GitHub Actions
 
-Run these commands from the repository root on Windows with the stable Rust MSVC toolchain installed:
+All three build workflows are **manual only**. They do not run on pushes or pull requests.
 
-```powershell
-cargo build --release -p core
-cargo build --release -p module-udio
-cargo build --release -p module-youtube
-```
+Open the repository's **Actions** tab, choose the required workflow from the left sidebar, click **Run workflow**, select branch `codex/modular-runtime-rework`, and confirm **Run workflow**.
 
-Build products:
+| Workflow | Output artifact |
+|---|---|
+| **Build Core** (`.github/workflows/build.yml`) | `UniDownloader-Core-Windows` — EXE and module manifests |
+| **Build Udio Module** (`.github/workflows/build-udio.yml`) | `UniDownloader-Udio-Windows` — Udio DLL and manifest |
+| **Build YouTube Module** (`.github/workflows/build-youtube.yml`) | `UniDownloader-YouTube-Windows` — YouTube DLL and manifest |
 
-- `target/release/UniDownloader.exe`
-- `target/release/module_udio.dll`
-- `target/release/module_youtube.dll`
+After a workflow finishes successfully, open its run, scroll to **Artifacts**, and download the corresponding ZIP. Build the Core first, then build the module DLLs. Extract the three artifacts into the same runtime folder, preserving the `Modules/udio` and `Modules/youtube` subfolders.
 
-The module DLLs are independent build targets. Rebuild both DLLs when the module ABI version changes.
+The workflows use Windows runners and the stable Rust MSVC toolchain. Nothing needs to be installed or built on your computer.
 
 ## Runtime folder layout
 
@@ -43,7 +41,7 @@ UniDownloader/
 └── Downloads/
 ```
 
-The two `module.json` files are included in this repository. Copy the matching DLL from `target/release` into its module folder. `Icon.ico` is optional.
+The two `module.json` files are included in the Core artifact and repeated alongside their matching DLLs in the module artifacts. `Icon.ico` is optional.
 
 ## Launching modules
 
