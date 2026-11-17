@@ -81,9 +81,8 @@ fn download_udio(req: &Request) -> Result<(), String> {
 
     let cover = meta.cover.as_deref().and_then(|u| download_bytes(&client, u).ok());
     write_tags(&mp3, &meta, cover, &req.url)?;
-    let final_path = publish_unique(out, &sanitize(&meta.title), &mp3)?;
+    publish_unique(out, &sanitize(&meta.title), &mp3)?;
     drop(temp);
-    let _ = final_path;
     Ok(())
 }
 
