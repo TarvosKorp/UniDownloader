@@ -9,7 +9,12 @@
 //!
 //! ```ignore
 //! #[no_mangle]
-//! pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }\n//!\n//! #[no_mangle]\n//! pub extern "C" fn module_ui_json() -> *const c_char {\n//!     b"{\\"name\\":\\"Module\\", ...}\\0".as_ptr() as *const c_char\n//! }
+//! pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }
+//!
+//! #[no_mangle]
+//! pub extern "C" fn module_ui_json() -> *const c_char {
+//!     b"{\"name\":\"Module\"}\0".as_ptr() as *const c_char
+//! }
 //!
 //! #[no_mangle]
 //! pub unsafe extern "C" fn run_download(/* см. RunDownloadFn */) -> i32 {
