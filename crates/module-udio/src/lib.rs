@@ -83,7 +83,8 @@ fn download_udio(req: &Request) -> Result<(), String> {
     write_tags(&mp3, &meta, cover, &req.url)?;
     let final_path = publish_unique(out, &sanitize(&meta.title), &mp3)?;
     drop(temp);
-    Ok(format!("Saved: {}", final_path.display()))
+    let _ = final_path;
+    Ok(())
 }
 
 fn build_client() -> Result<Client, String> {
