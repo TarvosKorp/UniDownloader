@@ -24,13 +24,18 @@ jobs:
       - name: Build Core
         run: cargo build --release -p core
 
+      - name: Prepare Core package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package/Modules/udio, package/Modules/youtube | Out-Null
+          Copy-Item target/release/UniDownloader.exe package/UniDownloader.exe
+          Copy-Item Modules/udio/module.json package/Modules/udio/module.json
+          Copy-Item Modules/youtube/module.json package/Modules/youtube/module.json
+          if (Test-Path Icon.ico) { Copy-Item Icon.ico package/Icon.ico }
+
       - name: Upload Core artifact
         uses: actions/upload-artifact@v4
         with:
           name: UniDownloader-Core-Windows
           if-no-files-found: error
-          path: |
-            target/release/UniDownloader.exe
-            Modules/udio/module.json
-            Modules/youtube/module.json
-            Icon.ico
+          path: package/**
