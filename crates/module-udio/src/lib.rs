@@ -6,7 +6,7 @@ use std::{ffi::c_char, fs, io::Write, path::{Path, PathBuf}, process::Command, t
 use tempfile::Builder;
 use widevine::{Cdm, Device, LicenseType, Pssh};
 
-static MODULE_UI_JSON: &[u8] = b"{\"name\":\"Udio\",\"url_label\":\"Udio track URL\",\"qualities\":[\"128\",\"160\",\"Max\"],\"default_quality\":\"Max\",\"supports_bitrate\":false,\"supports_batch\":true}\\0";
+static MODULE_UI_JSON: &[u8] = b"{\"name\":\"Udio\",\"url_label\":\"Udio track URL\",\"qualities\":[\"128\",\"160\",\"Max\"],\"default_quality\":\"Max\",\"supports_bitrate\":false,\"supports_batch\":true}\0";
 
 #[no_mangle]
 pub extern "C" fn module_ui_json() -> *const c_char { MODULE_UI_JSON.as_ptr() as *const c_char }
