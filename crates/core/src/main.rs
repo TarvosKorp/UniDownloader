@@ -193,7 +193,7 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut temp_path = None;
     let mut file = None;
     for n in 0..100u32 {
-        let candidate = parent.join(format!(".{}.{}.{}.tmp", path.file_name().unwrap_or_default().to_string_lossy(),
+        let candidate = parent.join(format!(".{}.{}.{}.tmp", path.file_name().and_then(|s| s.to_str()).unwrap_or("batch-list"),
             std::process::id(), n));
         match OpenOptions::new().write(true).create_new(true).open(&candidate) {
             Ok(f) => { temp_path = Some(candidate); file = Some(f); break; }
@@ -203,15 +203,17 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
     }
     let temp_path = temp_path.ok_or("Cannot allocate a temporary list filename")?;
     let mut file = file.unwrap();
-    let result = (|| {
-        file.write_all(data).map_err(|e| format!("Cannot write temporary list: {e}"))?;
-        file.sync_all().map_err(|e| format!("Cannot flush temporary list: {e}"))?;
-        drop(file);
-        fs::rename(&temp_path, path).map_err(|e| format!("Cannot replace batch list: {e}"))?;
-        Ok(())
-    })();
-    if result.is_err() { let _ = fs::remove_file(&temp_path); }
-    result
+    let write_result = file.write_all(data).and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("Cannot write or flush temporary list: {error}"));
+    }
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("Cannot replace batch list: {error}"));
+    }
+    Ok(())
 }
 
 fn append_error_log(module_id: &str, url: &str, error: &str) {
