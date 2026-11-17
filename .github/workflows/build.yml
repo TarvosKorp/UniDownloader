@@ -1,10 +1,13 @@
-name: Build UniDownloader
+name: Build Core
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-windows:
+  build-core:
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -18,12 +21,16 @@ jobs:
       - name: Cache Cargo
         uses: swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --release -p module-udio
+      - name: Build Core
+        run: cargo build --release -p core
 
-      - name: Upload Artifact
+      - name: Upload Core artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UniDownloader-Windows
+          name: UniDownloader-Core-Windows
+          if-no-files-found: error
           path: |
-            target/release/module_udio.dll
+            target/release/UniDownloader.exe
+            Modules/udio/module.json
+            Modules/youtube/module.json
+            Icon.ico
