@@ -3,7 +3,7 @@ use std::ffi::c_char;
 use std::path::Path;
 use std::process::Command;
 
-static MODULE_UI_JSON: &[u8] = br#"{"name":"YouTube","url_label":"Video or playlist URL","qualities":["144p","240p","360p","480p","720p","1080p","MP3"],"default_quality":"360p","supports_bitrate":true,"supports_batch":true}"#;
+static MODULE_UI_JSON: &[u8] = b"{\"name\":\"YouTube\",\"url_label\":\"Video or playlist URL\",\"qualities\":[\"144p\",\"240p\",\"360p\",\"480p\",\"720p\",\"1080p\",\"MP3\"],\"default_quality\":\"360p\",\"supports_bitrate\":true,\"supports_batch\":true}\0";
 
 #[no_mangle]
 pub extern "C" fn module_ui_json() -> *const c_char { MODULE_UI_JSON.as_ptr() as *const c_char }
