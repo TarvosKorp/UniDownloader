@@ -201,7 +201,7 @@ fn download_file(c: &Client, url: &str, path: &Path) -> Result<(), String> {
             Err(e) => { last=e; let _=fs::remove_file(path); if attempt<RETRIES { thread::sleep(std::time::Duration::from_millis(300*attempt as u64)); } }
         }
     }
-    Err(format!("Segment download failed after {RETRIES} attempts: {url}: {last}"))
+    Err(format!("Segment download failed after {RETRIES} attempts: {last}"))
 }
 
 fn download_bytes(c: &Client,url: &str)->Result<Vec<u8>,String>{
