@@ -6,6 +6,11 @@ use std::{ffi::c_char, fs, io::Write, path::{Path, PathBuf}, process::Command, t
 use tempfile::Builder;
 use widevine::{Cdm, Device, LicenseType, Pssh};
 
+static MODULE_UI_JSON: &[u8] = br#"{"name":"Udio","url_label":"Udio track URL","qualities":["128","160","Max"],"default_quality":"Max","supports_bitrate":false,"supports_batch":true}"#;
+
+#[no_mangle]
+pub extern "C" fn module_ui_json() -> *const c_char { MODULE_UI_JSON.as_ptr() as *const c_char }
+
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const WORKERS: usize = 4;
 const RETRIES: usize = 3;
