@@ -247,7 +247,10 @@ fn process_error(name:&str,status:&std::process::ExitStatus,stderr:&[u8],secrets
 fn sanitize(s:&str)->String{
     let cleaned=Regex::new(r#"[<>:"/\\|?*]"#).unwrap().replace_all(s,"_").to_string();
     let result:String=cleaned.trim_matches(|c:char|c=='.'||c.is_whitespace()).chars().take(100).collect();
-    if result.is_empty(){"Unknown Track".into()}else{result}
+    if result.is_empty() { return "Unknown Track".into(); }
+    let upper = result.to_ascii_uppercase();
+    let reserved = ["CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9","LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"];
+    if reserved.contains(&upper.as_str()) { format!("_{result}") } else { result }
 }
 fn decode(s:&str)->String{s.replace("&amp;","&").replace("&quot;","\"").replace("&#x27;","'").replace("&#39;","'").replace("&lt;","<").replace("&gt;",">")}
 struct Metadata{title:String,artist:String,tags:Vec<String>,cover:Option<String>}
