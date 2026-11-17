@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/modular-runtime-rework
+  pull_request:
+    branches:
+      - main
 
 jobs:
   check-workspace:
