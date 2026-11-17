@@ -24,11 +24,16 @@ jobs:
       - name: Build YouTube DLL
         run: cargo build --release -p module-youtube
 
+      - name: Prepare YouTube package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package/Modules/youtube | Out-Null
+          Copy-Item target/release/module_youtube.dll package/Modules/youtube/module_youtube.dll
+          Copy-Item Modules/youtube/module.json package/Modules/youtube/module.json
+
       - name: Upload YouTube artifact
         uses: actions/upload-artifact@v4
         with:
           name: UniDownloader-YouTube-Windows
           if-no-files-found: error
-          path: |
-            target/release/module_youtube.dll
-            Modules/youtube/module.json
+          path: package/**
