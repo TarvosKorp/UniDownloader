@@ -63,7 +63,7 @@ fn download_udio(req: &Request) -> Result<(), String> {
     hide_console(&mut cmd);
     let result = cmd.arg("--key").arg(format!("1:{key}")).arg(&encrypted).arg(&decrypted)
         .output().map_err(|e| format!("Cannot start mp4decrypt: {e}"))?;
-    if !result.status.success() { return Err(process_error("mp4decrypt", &result.status, &result.stderr)); }
+    if !result.status.success() { return Err(process_error("mp4decrypt", &result.status, &result.stderr, &[&key])); }
     if !decrypted.is_file() { return Err("mp4decrypt produced no output file".into()); }
 
     let mp3 = dir.join("track.mp3");
@@ -76,7 +76,7 @@ fn download_udio(req: &Request) -> Result<(), String> {
         _ => { ff.arg("-q:a").arg("2"); } // Same VBR quality as the working Python downloader.
     }
     let result = ff.arg(&mp3).output().map_err(|e| format!("Cannot start FFmpeg: {e}"))?;
-    if !result.status.success() { return Err(process_error("FFmpeg", &result.status, &result.stderr)); }
+    if !result.status.success() { return Err(process_error("FFmpeg", &result.status, &result.stderr, &[])); }
     if !mp3.is_file() { return Err("FFmpeg produced no MP3 file".into()); }
 
     let cover = meta.cover.as_deref().and_then(|u| download_bytes(&client, u).ok());
@@ -193,6 +193,7 @@ fn download_file(c: &Client, url: &str, path: &Path) -> Result<(), String> {
             let mut r = c.get(url).send().map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
             let mut f = fs::File::create(path).map_err(|e| e.to_string())?;
             r.copy_to(&mut f).map_err(|e| e.to_string())?;
+            if f.metadata().map_err(|e| e.to_string())?.len() == 0 { return Err("server returned an empty segment".into()); }
             f.flush().map_err(|e| e.to_string())
         })();
         match result {
@@ -236,9 +237,10 @@ fn publish_unique(dir:&Path,base:&str,source:&Path)->Result<PathBuf,String>{
     Err("No free output filename after 10000 attempts".into())
 }
 
-fn process_error(name:&str,status:&std::process::ExitStatus,stderr:&[u8])->String{
+fn process_error(name:&str,status:&std::process::ExitStatus,stderr:&[u8],secrets:&[&str])->String{
     let code=status.code().map_or("unknown".into(),|c|c.to_string());
-    let details=String::from_utf8_lossy(stderr);
+    let mut details=String::from_utf8_lossy(stderr).into_owned();
+    for secret in secrets { if !secret.is_empty() { details=details.replace(secret,"[REDACTED]"); } }
     if details.trim().is_empty(){format!("{name} failed (exit code {code}); stderr empty")}
     else{format!("{name} failed (exit code {code}): {}",details.trim())}
 }
