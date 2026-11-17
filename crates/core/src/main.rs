@@ -32,10 +32,11 @@ impl ModuleLock {
     fn acquire(module_id: &str) -> Result<Self, String> {
         #[cfg(windows)]
         unsafe {
-            use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+            use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, SetLastError, ERROR_ALREADY_EXISTS};
             use windows_sys::Win32::System::Threading::CreateMutexW;
             let name = format!("Local\\UniDownloader.Module.{module_id}");
             let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            SetLastError(0);
             let handle = CreateMutexW(std::ptr::null(), 0, wide.as_ptr());
             if handle.is_null() {
                 return Err(format!("Cannot create module mutex (Windows error {})", GetLastError()));
@@ -412,6 +413,18 @@ fn run_window<T: eframe::App + 'static>(title: String, size: [f32;2], app: T) ->
     }))
 }
 
+fn show_error(message: &str) {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        let title: Vec<u16> = "UniDownloader".encode_utf16().chain(std::iter::once(0)).collect();
+        MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+    #[cfg(not(windows))]
+    eprintln!("{message}");
+}
+
 fn main() -> eframe::Result {
     apply_proxy_config();
     let args: Vec<String> = std::env::args().collect();
@@ -420,7 +433,7 @@ fn main() -> eframe::Result {
         let runtime = match load_module(&id) {
             Ok(r) => r,
             Err(error) => {
-                eprintln!("{error}");
+                show_error(&error);
                 return Ok(());
             }
         };
