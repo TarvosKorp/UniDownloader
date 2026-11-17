@@ -24,11 +24,16 @@ jobs:
       - name: Build Udio DLL
         run: cargo build --release -p module-udio
 
+      - name: Prepare Udio package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package/Modules/udio | Out-Null
+          Copy-Item target/release/module_udio.dll package/Modules/udio/module_udio.dll
+          Copy-Item Modules/udio/module.json package/Modules/udio/module.json
+
       - name: Upload Udio artifact
         uses: actions/upload-artifact@v4
         with:
           name: UniDownloader-Udio-Windows
           if-no-files-found: error
-          path: |
-            target/release/module_udio.dll
-            Modules/udio/module.json
+          path: package/**
