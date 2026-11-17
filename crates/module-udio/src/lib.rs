@@ -4,7 +4,7 @@ use regex::Regex;
 use reqwest::{blocking::Client, Url};
 use std::{ffi::c_char, fs, io::Write, path::{Path, PathBuf}, process::Command, thread};
 use tempfile::Builder;
-use widevine::{Cdm, Device, LicenseType, Pssh};
+use widevine::{Cdm, Device, KeyType, LicenseType, Pssh};
 
 static MODULE_UI_JSON: &[u8] = b"{\"name\":\"Udio\",\"url_label\":\"Udio track URL\",\"qualities\":[\"128\",\"160\",\"Max\"],\"default_quality\":\"Max\",\"supports_bitrate\":false,\"supports_batch\":true}\0";
 
@@ -145,9 +145,6 @@ fn get_key(c: &Client, url: &str) -> Result<String, String> {
         .map_err(|e| format!("License manifest HTTP error: {e}"))?.text().map_err(|e| e.to_string())?;
     let pssh = Regex::new(r#"URI="data:text/plain;base64,([^"]+)"#).unwrap().captures(&manifest)
         .and_then(|m| m.get(1)).map(|m| m.as_str()).ok_or("PSSH not found")?;
-    let kid = Regex::new(r#"KEYID=0x([a-fA-F0-9]{32})"#).unwrap().captures(&manifest)
-        .and_then(|m| m.get(1)).map(|m| m.as_str()).ok_or("KID not found")?;
-    let kid: [u8;16] = hex::decode(kid).map_err(|e| e.to_string())?.try_into().map_err(|_| "Invalid KID")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let wvd = exe.parent().ok_or("No application directory")?.join("Components").join("WidevineKey.wvd");
     let device = Device::read_wvd(fs::File::open(&wvd).map_err(|e| format!("Cannot open {}: {e}",wvd.display()))?)
@@ -162,7 +159,8 @@ fn get_key(c: &Client, url: &str) -> Result<String, String> {
         .error_for_status().map_err(|e| format!("License server HTTP error: {e}"))?;
     let data = response.bytes().map_err(|e| e.to_string())?;
     let keys = request.get_keys(&data).map_err(|e| format!("Cannot parse license: {e:?}"))?;
-    let key = keys.content_key(&kid).map_err(|e| format!("Content key for KID unavailable: {e:?}"))?;
+    let key = keys.first_of_type(KeyType::CONTENT)
+        .map_err(|e| format!("License response contains no CONTENT key: {e:?}"))?;
     // Do not include the content key, challenge or license body in diagnostics.
     Ok(hex::encode(key.key.clone()))
 }
