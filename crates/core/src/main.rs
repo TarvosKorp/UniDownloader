@@ -138,8 +138,11 @@ fn config_text() -> String {
 
 fn ffmpeg_path() -> PathBuf {
     let dir = exe_dir().unwrap_or_default();
-    config_value(&config_text(), "FFMPEG_PATH").filter(|s| !s.is_empty())
-        .map(PathBuf::from).unwrap_or_else(|| dir.join("Components").join("ffmpeg.exe"))
+    match config_value(&config_text(), "FFMPEG_PATH").filter(|s| !s.is_empty()).map(PathBuf::from) {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => dir.join(path),
+        None => dir.join("Components").join("ffmpeg.exe"),
+    }
 }
 
 fn apply_proxy_config() {
@@ -258,10 +261,13 @@ fn discover_modules() -> Vec<ModuleManifest> {
     let modules = exe_dir().unwrap_or_default().join("Modules");
     if let Ok(entries) = fs::read_dir(modules) {
         for entry in entries.flatten() {
+            let folder_id = entry.file_name().to_string_lossy().to_string();
             let path = entry.path().join("module.json");
             if let Ok(data) = fs::read_to_string(path) {
                 if let Ok(m) = serde_json::from_str::<ModuleManifest>(&data) {
-                    if valid_module_id(&m.id) { found.push(m); }
+                    if valid_module_id(&m.id) && m.id == folder_id && !m.name.trim().is_empty() {
+                        found.push(m);
+                    }
                 }
             }
         }
@@ -277,7 +283,7 @@ fn create_shortcuts() -> Result<String, String> {
         let folder = base.join("Modules").join(&module.id);
         let dll = folder.join(format!("module_{}.dll", module.id));
         if !dll.is_file() { continue; }
-        let safe_name: String = module.name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+        let safe_name: String = module.name.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
         let shortcut_path = base.join(format!("{safe_name}.lnk"));
         let icon = folder.join("Icon.ico");
         let mut builder = lnks::ShortcutBuilder::new(exe.clone())
