@@ -5,11 +5,11 @@
 //! через неё нельзя передавать `String`, `Vec`, `Box<dyn Trait>` и т.п.
 //! Передаются только C-строки и числа.
 //!
-//! Каждая DLL модуля обязана экспортировать две функции:
+//! Каждая DLL модуля обязана экспортировать три функции:
 //!
 //! ```ignore
 //! #[no_mangle]
-//! pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }
+//! pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }\n//!\n//! #[no_mangle]\n//! pub extern "C" fn module_ui_json() -> *const c_char {\n//!     b"{\\"name\\":\\"Module\\", ...}\\0".as_ptr() as *const c_char\n//! }
 //!
 //! #[no_mangle]
 //! pub unsafe extern "C" fn run_download(/* см. RunDownloadFn */) -> i32 {
