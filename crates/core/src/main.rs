@@ -354,11 +354,11 @@ impl eframe::App for ModuleApp {
                         if let Ok(text) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
                             self.url = text;
                         }
-                        ui.close();
+                        ui.close_menu();
                     }
                     if ui.button("Clear").clicked() {
                         self.url.clear();
-                        ui.close();
+                        ui.close_menu();
                     }
                 });
             });
