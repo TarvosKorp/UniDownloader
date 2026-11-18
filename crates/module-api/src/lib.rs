@@ -5,11 +5,16 @@
 //! через неё нельзя передавать `String`, `Vec`, `Box<dyn Trait>` и т.п.
 //! Передаются только C-строки и числа.
 //!
-//! Каждая DLL модуля обязана экспортировать две функции:
+//! Каждая DLL модуля обязана экспортировать три функции:
 //!
 //! ```ignore
 //! #[no_mangle]
 //! pub extern "C" fn module_abi_version() -> u32 { module_api::ABI_VERSION }
+//!
+//! #[no_mangle]
+//! pub extern "C" fn module_ui_json() -> *const c_char {
+//!     b"{\"name\":\"Module\"}\0".as_ptr() as *const c_char
+//! }
 //!
 //! #[no_mangle]
 //! pub unsafe extern "C" fn run_download(/* см. RunDownloadFn */) -> i32 {
@@ -29,17 +34,22 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::Command;
 
 /// Версия контракта. Ядро сравнивает её с `module_abi_version()` из DLL.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// Имена экспортируемых символов (с завершающим нулём — для `libloading`).
 pub const SYM_ABI_VERSION: &[u8] = b"module_abi_version\0";
 pub const SYM_RUN_DOWNLOAD: &[u8] = b"run_download\0";
+pub const SYM_MODULE_UI_JSON: &[u8] = b"module_ui_json\0";
 
 /// Коды возврата `run_download`.
 pub const RESULT_OK: i32 = 0;
 pub const RESULT_ERR: i32 = 1;
 
 pub type AbiVersionFn = unsafe extern "C" fn() -> u32;
+
+/// Returns a module-owned JSON description of its controls. The returned
+/// pointer must refer to a static, null-terminated UTF-8 string in the DLL.
+pub type ModuleUiJsonFn = unsafe extern "C" fn() -> *const c_char;
 
 /// `err_buf`/`err_buf_len` — буфер, выделенный ядром. При ошибке модуль пишет
 /// туда текст (UTF-8, с нулём в конце), и ядро показывает его пользователю.

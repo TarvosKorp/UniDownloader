@@ -27,11 +27,8 @@ jobs:
       - name: Prepare Core package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path package/Modules/udio, package/Modules/youtube | Out-Null
+          New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item target/release/UniDownloader.exe package/UniDownloader.exe
-          Copy-Item Modules/udio/module.json package/Modules/udio/module.json
-          Copy-Item Modules/youtube/module.json package/Modules/youtube/module.json
-          if (Test-Path Icon.ico) { Copy-Item Icon.ico package/Icon.ico }
 
       - name: Upload Core artifact
         uses: actions/upload-artifact@v4
