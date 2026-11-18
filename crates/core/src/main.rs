@@ -306,13 +306,14 @@ struct LauncherApp { status: String }
 impl eframe::App for LauncherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("UniDownloader");
+            let blue = egui::Color32::from_rgb(0, 168, 255);
+            ui.label(egui::RichText::new("UniDownloader").size(22.0).color(blue).strong());
             ui.separator();
             ui.label("Modules are launched through their own shortcuts.");
-            if ui.button("Create / refresh module shortcuts").clicked() {
+            if ui.button(egui::RichText::new("Create / refresh module shortcuts").color(blue)).clicked() {
                 self.status = create_shortcuts().unwrap_or_else(|e| format!("Error: {e}"));
             }
-            ui.label(&self.status);
+            ui.label(egui::RichText::new(&self.status).color(blue));
         });
     }
 }
@@ -342,11 +343,24 @@ impl eframe::App for ModuleApp {
         if let Ok(message) = self.rx.try_recv() { self.status = message; self.busy = false; }
         let ui_spec = self.runtime.ui.clone();
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(&ui_spec.name);
+            let blue = egui::Color32::from_rgb(0, 168, 255);
+            ui.label(egui::RichText::new(&ui_spec.name).size(22.0).color(blue).strong());
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label(&ui_spec.url_label);
-                ui.add(egui::TextEdit::singleline(&mut self.url).desired_width(390.0));
+                let response = ui.add(egui::TextEdit::singleline(&mut self.url).desired_width(300.0));
+                response.context_menu(|ui| {
+                    if ui.button("Paste").clicked() {
+                        if let Ok(text) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+                            self.url = text;
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Clear").clicked() {
+                        self.url.clear();
+                        ui.close();
+                    }
+                });
             });
             ui.horizontal(|ui| {
                 ui.label("Quality:");
@@ -404,7 +418,7 @@ impl eframe::App for ModuleApp {
                     let _ = std::process::Command::new("explorer").arg(p).spawn();
                 }
             });
-            ui.label(&self.status);
+            ui.label(egui::RichText::new(&self.status).color(blue));
             if self.busy { ui.spinner(); }
         });
     }
@@ -448,8 +462,8 @@ fn main() -> eframe::Result {
             }
         };
         let title = runtime.ui.name.clone();
-        run_window(title, [600.0, 260.0], ModuleApp::new(runtime))
+        run_window(title, [480.0, 195.0], ModuleApp::new(runtime))
     } else {
-        run_window("UniDownloader".into(), [430.0, 180.0], LauncherApp { status: String::new() })
+        run_window("UniDownloader".into(), [344.0, 135.0], LauncherApp { status: String::new() })
     }
 }
