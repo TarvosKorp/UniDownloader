@@ -10,7 +10,7 @@ Open the repository's **Actions** tab, choose the required workflow from the lef
 
 | Workflow | Output artifact |
 |---|---|
-| **Build Core** (`.github/workflows/build.yml`) | `UniDownloader-Core-Windows` — EXE and module manifests |
+| **Build Core** (`.github/workflows/build.yml`) | `UniDownloader-Core-Windows` — only `UniDownloader.exe` |
 | **Build Udio Module** (`.github/workflows/build-udio.yml`) | `UniDownloader-Udio-Windows` — Udio DLL and manifest |
 | **Build YouTube Module** (`.github/workflows/build-youtube.yml`) | `UniDownloader-YouTube-Windows` — YouTube DLL and manifest |
 
@@ -41,7 +41,7 @@ UniDownloader/
 └── Downloads/
 ```
 
-The two `module.json` files are included in the Core artifact and repeated alongside their matching DLLs in the module artifacts. `Icon.ico` is optional.
+Each module artifact contains its own `module.json` beside the matching DLL. The Core artifact contains only `UniDownloader.exe`; it does not package the `Modules` directory or `Icon.ico`. Create the `Modules/<id>/` folders by extracting the two module artifacts.
 
 ## Launching modules
 
