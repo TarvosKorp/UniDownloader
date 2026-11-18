@@ -6,7 +6,7 @@ UniDownloader uses one Windows executable as a launcher and module host. Each do
 
 All three build workflows are **manual only**. They do not run on pushes or pull requests.
 
-Open the repository's **Actions** tab, choose the required workflow from the left sidebar, click **Run workflow**, select branch `codex/modular-runtime-rework`, and confirm **Run workflow**.
+Open the repository's **Actions** tab, choose the required workflow from the left sidebar, click **Run workflow**, select branch `main`, and confirm **Run workflow**.
 
 | Workflow | Output artifact |
 |---|---|
